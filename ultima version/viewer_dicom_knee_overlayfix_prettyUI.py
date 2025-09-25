@@ -462,41 +462,56 @@ def launch_viewer():
     # --- Layout helpers / posiciones ---
     panel_left, panel_width = 0.74, 0.23
     slider_left, slider_width = 0.08, 0.64
+    panel_top, min_panel_bottom = 0.90, 0.05
 
     # Layout dinámico del panel para evitar superposiciones entre elementos
     panel_coords = {}
-    _panel_cursor = 0.90
+    slots = [
+        ("btnload", 0.075, 0.016),
+        ("btnhist", 0.060, 0.018),
+        ("section_seg", 0.032, 0.008),
+        ("pmh_txt", 0.070, 0.010),
+        ("pmh_apply", 0.055, 0.016),
+        ("section_overlay", 0.030, 0.008),
+        ("ovl", 0.095, 0.014),
+        ("chk_second", 0.060, 0.016),
+        ("section_post", 0.030, 0.008),
+        ("s_sit", 0.060, 0.012),
+        ("s_pbd", 0.060, 0.012),
+        ("s_dec", 0.060, 0.020),
+        ("section_export", 0.030, 0.008),
+        ("btn3d", 0.060, 0.012),
+        ("btnstl", 0.060, 0.012),
+        ("btnval", 0.060, 0.0),
+    ]
 
-    def _add_panel_slot(name, height, gap=0.012):
+    total_consumption = sum(height + gap for _, height, gap in slots)
+    max_available = panel_top - min_panel_bottom
+    if total_consumption > max_available:
+        factor = max_available / total_consumption
+    else:
+        factor = 1.0
+
+    _panel_cursor = panel_top
+
+    def _add_panel_slot(name, height, gap):
         nonlocal _panel_cursor
-        _panel_cursor -= height
-        panel_coords[name] = [panel_left, _panel_cursor, panel_width, height]
-        _panel_cursor -= gap
+        height_scaled = height * factor
+        gap_scaled = gap * factor
+        _panel_cursor -= height_scaled
+        panel_coords[name] = [panel_left, _panel_cursor, panel_width, height_scaled]
+        _panel_cursor -= gap_scaled
 
-    _add_panel_slot("btnload", 0.075, gap=0.016)
-    _add_panel_slot("btnhist", 0.060, gap=0.018)
-    _add_panel_slot("section_seg", 0.032, gap=0.008)
-    _add_panel_slot("pmh_txt", 0.070, gap=0.010)
-    _add_panel_slot("pmh_apply", 0.055, gap=0.016)
-    _add_panel_slot("section_overlay", 0.030, gap=0.008)
-    _add_panel_slot("ovl", 0.095, gap=0.014)
-    _add_panel_slot("chk_second", 0.060, gap=0.016)
-    _add_panel_slot("section_post", 0.030, gap=0.008)
-    _add_panel_slot("s_sit", 0.060, gap=0.012)
-    _add_panel_slot("s_pbd", 0.060, gap=0.012)
-    _add_panel_slot("s_dec", 0.060, gap=0.020)
-    _add_panel_slot("section_export", 0.030, gap=0.008)
-    _add_panel_slot("btn3d", 0.060, gap=0.012)
-    _add_panel_slot("btnstl", 0.060, gap=0.012)
-    _add_panel_slot("btnval", 0.060, gap=0.0)
+    for name, height, gap in slots:
+        _add_panel_slot(name, height, gap)
 
-    panel_bottom = max(_panel_cursor - 0.02, 0.05)
+    panel_bottom = max(_panel_cursor - 0.02, min_panel_bottom)
 
     layout = {
         "panel_left": panel_left,
         "panel_width": panel_width,
         "panel_bottom": panel_bottom,
-        "panel_top": 0.90,
+        "panel_top": panel_top,
         "slider_coords": {
             "s_z":   [slider_left, 0.23, slider_width, 0.040],
             "s_T23": [slider_left, 0.150, slider_width, 0.045],
