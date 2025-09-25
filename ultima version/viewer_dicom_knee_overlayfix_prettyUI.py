@@ -452,108 +452,67 @@ def launch_viewer():
         "min_volume_mm3": 3e5,
     }
 
-    fig, ax = plt.subplots(figsize=(11.2, 7.8)); _deactivate_toolbar(fig)
+
+    fig, ax = plt.subplots(figsize=(10.5, 7.4)); _deactivate_toolbar(fig)
     fig.patch.set_facecolor('#f4f6fb')
-    plt.subplots_adjust(left=0.06, right=0.73, bottom=0.20, top=0.89)
-    fig.suptitle('Segmentación de rodilla – visor interactivo', fontsize=14, fontweight='bold', y=0.98)
-    ax.set_position([0.06, 0.29, 0.66, 0.57])
+    plt.subplots_adjust(left=0.06, right=0.74, bottom=0.24, top=0.90)
+    fig.suptitle('Segmentación de rodilla – visor interactivo', fontsize=14, fontweight='bold')
     state["fig"] = fig; state["axes"]["img"] = ax
 
     # --- Layout helpers / posiciones ---
-    panel_left, panel_width = 0.74, 0.23
+    panel_left, panel_width = 0.76, 0.21
+    panel_bottom, panel_top = 0.05, 0.93
     slider_left, slider_width = 0.08, 0.64
-
-    def _build_panel_layout():
-        panel_top, min_panel_bottom = 0.90, 0.05
-        slots = [
-            ("btnload", 0.075, 0.016),
-            ("btnhist", 0.060, 0.018),
-            ("section_seg", 0.032, 0.008),
-            ("pmh_txt", 0.070, 0.010),
-            ("pmh_apply", 0.055, 0.016),
-            ("section_overlay", 0.030, 0.008),
-            ("ovl", 0.095, 0.014),
-            ("chk_second", 0.060, 0.016),
-            ("section_post", 0.030, 0.008),
-            ("s_sit", 0.060, 0.012),
-            ("s_pbd", 0.060, 0.012),
-            ("s_dec", 0.060, 0.020),
-            ("section_export", 0.030, 0.008),
-            ("btn3d", 0.060, 0.012),
-            ("btnstl", 0.060, 0.012),
-            ("btnval", 0.060, 0.0),
-        ]
-
-        total_consumption = sum(height + gap for _, height, gap in slots)
-        max_available = panel_top - min_panel_bottom
-        factor = max_available / total_consumption if total_consumption > max_available else 1.0
-
-        cursor = panel_top
-        panel_coords = {}
-        for name, height, gap in slots:
-            height_scaled = height * factor
-            gap_scaled = gap * factor
-            cursor -= height_scaled
-            panel_coords[name] = [panel_left, cursor, panel_width, height_scaled]
-            cursor -= gap_scaled
-
-        panel_bottom = max(cursor - 0.02, min_panel_bottom)
-
-        return {
-            "panel_left": panel_left,
-            "panel_width": panel_width,
-            "panel_bottom": panel_bottom,
-            "panel_top": panel_top,
-            "panel_coords": panel_coords,
-            "slider_coords": {
-                "s_z":   [slider_left, 0.23, slider_width, 0.040],
-                "s_T23": [slider_left, 0.150, slider_width, 0.045],
-                "s_T14": [slider_left, 0.070, slider_width, 0.045],
-            },
-            "panel_bg": [panel_left - 0.015, panel_bottom - 0.02,
-                          panel_width + 0.03, panel_top - panel_bottom + 0.07],
-            "slider_bg": [slider_left - 0.025, 0.045, slider_width + 0.05, 0.25],
+    layout = {
+        "panel_left": panel_left,
+        "panel_width": panel_width,
+        "panel_bottom": panel_bottom,
+        "panel_top": panel_top,
+        "slider_coords": {
+            "s_z":   [slider_left, 0.19, slider_width, 0.035],
+            "s_T23": [slider_left, 0.125, slider_width, 0.042],
+            "s_T14": [slider_left, 0.07, slider_width, 0.042],
+        },
+        "panel_coords": {
+            "btnload": [panel_left, 0.845, panel_width, 0.065],
+            "btnhist": [panel_left, 0.775, panel_width, 0.055],
+            "section_seg": [panel_left, 0.725, panel_width, 0.03],
+            "pmh_txt": [panel_left, 0.675, panel_width, 0.05],
+            "pmh_apply": [panel_left, 0.625, panel_width, 0.045],
+            "section_overlay": [panel_left, 0.585, panel_width, 0.03],
+            "ovl": [panel_left, 0.515, panel_width, 0.085],
+            "chk_second": [panel_left, 0.465, panel_width, 0.045],
+            "section_post": [panel_left, 0.425, panel_width, 0.03],
+            "s_sit": [panel_left, 0.375, panel_width, 0.045],
+            "s_pbd": [panel_left, 0.325, panel_width, 0.045],
+            "s_dec": [panel_left, 0.275, panel_width, 0.045],
+            "section_export": [panel_left, 0.225, panel_width, 0.03],
+            "btn3d": [panel_left, 0.175, panel_width, 0.055],
+            "btnstl": [panel_left, 0.11, panel_width, 0.055],
+            "btnval": [panel_left, 0.045, panel_width, 0.055],
         }
-
-    layout = _build_panel_layout()
+    }
     state["layout"] = layout
 
     # Panel lateral y zona de sliders: fondos suaves
-    ax_panel_bg = fig.add_axes(layout["panel_bg"])
+    ax_panel_bg = fig.add_axes([panel_left - 0.015, panel_bottom - 0.02, panel_width + 0.03, panel_top - panel_bottom + 0.04])
     ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_panel_bg.axis('off')
 
-    ax_slider_bg = fig.add_axes(layout["slider_bg"])
+    ax_slider_bg = fig.add_axes([slider_left - 0.025, 0.055, slider_width + 0.05, 0.17])
     ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
                                      facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_slider_bg.axis('off')
-    slider_texts = (
-        (0.88, 'Explorar volumen y umbrales HU', 10.5, True),
-        (0.64, 'Usá el slider superior para navegar cortes axiales.', 9.2, False),
-        (0.42, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', 9.2, False),
-    )
-    for y, msg, size, is_title in slider_texts:
-        ax_slider_bg.text(
-            0.03,
-            y,
-            msg,
-            fontsize=size,
-            color='#111827' if is_title else '#4b5563',
-            fontweight='bold' if is_title else 'normal',
-            va='center',
-        )
+    ax_slider_bg.text(0.02, 0.86, 'Explorar volumen y umbrales HU', fontsize=10.5, color='#111827', fontweight='bold', va='center')
+    ax_slider_bg.text(0.02, 0.60, 'Usá el slider superior para navegar cortes axiales.', fontsize=9, color='#4b5563', va='center')
+    ax_slider_bg.text(0.02, 0.38, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', fontsize=9, color='#4b5563', va='center')
 
-    # Encabezado informativo con fondo
-    ax_header = fig.add_axes([0.055, 0.895, 0.66, 0.085])
-    ax_header.add_patch(Rectangle((0, 0), 1, 1, transform=ax_header.transAxes,
-                                  facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.1))
-    ax_header.axis('off')
-    ax_header.text(0.03, 0.66, '1. Cargar estudio · 2. Ajustar umbrales · 3. Validar / exportar',
-                   fontsize=11, color='#1f2937', weight='bold', va='center')
-    ax_header.text(0.03, 0.30,
-                   'Bone → rojo   |   Paciente → verde   |   STL exportado desde la máscara final',
-                   fontsize=9.6, color='#4b5563', va='center')
+    # Encabezados informativos
+    fig.text(0.06, 0.93, '1. Cargar estudio · 2. Ajustar umbrales · 3. Validar / exportar',
+             fontsize=11, color='#1f2937', weight='bold')
+    fig.text(0.06, 0.905, 'Bone → rojo  |  Paciente → verde  |  STL exportado desde la máscara final',
+             fontsize=10, color='#4b5563')
 
     # Placeholder inicial en el eje principal
     ax.set_facecolor('#111827')
@@ -933,7 +892,8 @@ def launch_viewer():
             except Exception:
                 pass
 
-            state["axes"]["img"].set_position([0.06, 0.29, 0.66, 0.57])
+
+            state["axes"]["img"].set_position([0.06, 0.28, 0.66, 0.60])
 
             coords = state["layout"]["panel_coords"]
             if not state.get("ui_initialized"):
