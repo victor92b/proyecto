@@ -453,6 +453,7 @@ def launch_viewer():
     }
 
 
+
     fig, ax = plt.subplots(figsize=(10.5, 7.4)); _deactivate_toolbar(fig)
     fig.patch.set_facecolor('#f4f6fb')
     plt.subplots_adjust(left=0.06, right=0.74, bottom=0.24, top=0.90)
@@ -496,9 +497,11 @@ def launch_viewer():
 
     # Panel lateral y zona de sliders: fondos suaves
     ax_panel_bg = fig.add_axes([panel_left - 0.015, panel_bottom - 0.02, panel_width + 0.03, panel_top - panel_bottom + 0.04])
+
     ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_panel_bg.axis('off')
+
 
     ax_slider_bg = fig.add_axes([slider_left - 0.025, 0.055, slider_width + 0.05, 0.17])
     ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
@@ -513,6 +516,7 @@ def launch_viewer():
              fontsize=11, color='#1f2937', weight='bold')
     fig.text(0.06, 0.905, 'Bone → rojo  |  Paciente → verde  |  STL exportado desde la máscara final',
              fontsize=10, color='#4b5563')
+
 
     # Placeholder inicial en el eje principal
     ax.set_facecolor('#111827')
@@ -600,6 +604,7 @@ def launch_viewer():
 
     ax_section_seg = fig.add_axes(coords["section_seg"]); ax_section_seg.axis('off')
     ax_section_seg.text(0.0, 0.5, 'Parámetros de segmentación', fontsize=10.5, color='#111827', fontweight='bold', va='center')
+
 
     ax_section_overlay = fig.add_axes(coords["section_overlay"]); ax_section_overlay.axis('off')
     ax_section_overlay.text(0.0, 0.5, 'Visibilidad de máscaras', fontsize=10, color='#1f2937', fontweight='bold', va='center')
@@ -893,7 +898,9 @@ def launch_viewer():
                 pass
 
 
+
             state["axes"]["img"].set_position([0.06, 0.28, 0.66, 0.60])
+
 
             coords = state["layout"]["panel_coords"]
             if not state.get("ui_initialized"):
@@ -909,6 +916,7 @@ def launch_viewer():
                 ax_pmh_apply = fig.add_axes(coords["pmh_apply"])
                 btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU", color='#dcfce7', hovercolor='#bbf7d0')
                 _style_button(btn_pmh_apply, text_color='#166534', size=10)
+
 
                 ax_ovl = fig.add_axes(coords["ovl"])
                 chk_ovl = CheckButtons(ax_ovl, ["Ver Bone", "Ver Patient"],
@@ -932,6 +940,7 @@ def launch_viewer():
                         rect.set_facecolor('#f1f5f9'); rect.set_edgecolor('#cbd5f5')
                 except Exception:
                     pass
+
 
                 ax_sit = fig.add_axes(coords["s_sit"])
                 s_sit = Slider(ax_sit, "Suavizado (iters)", 0, 100, valinit=50, valstep=1)
@@ -1033,11 +1042,13 @@ def launch_viewer():
                 except Exception:
                     pass
 
+
             _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
             _style_slider(s_T23, face='#22c55e', track='#dcfce7')
             _style_slider(s_T14, face='#16a34a', track='#d1fae5')
 
             state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
 
             _format_slider_labels()
 
