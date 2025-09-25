@@ -207,6 +207,47 @@ try:
 except Exception:
     pydicom = None
 
+
+class NoSeriesFound(RuntimeError):
+    def __init__(self, folder: str, reason: str, found_modalities=None, code: str = "no_series"):
+        self.folder = folder
+        self.reason = reason
+        self.code = code
+        self.found_modalities = tuple(sorted(set(found_modalities or [])))
+        msg_reason = reason.strip()
+        super().__init__(f"NoSeriesFound: {msg_reason} -> {folder}")
+
+
+class NoCTSeriesFound(NoSeriesFound):
+    def __init__(self, folder: str, found_modalities=None):
+        reason = "Solo se encontraron series no-CT"
+        if found_modalities:
+            listed = ", ".join(sorted(set(found_modalities)))
+            reason = f"Solo se encontraron series no-CT (modalidades: {listed})"
+        super().__init__(folder, reason, found_modalities=found_modalities, code="no_ct")
+
+
+def _get_dicom_tags(path):
+    modality = None
+    sop_uid = None
+    if pydicom is not None:
+        try:
+            ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
+            modality = str(getattr(ds, "Modality", "")).upper() or None
+            sop_uid = str(getattr(ds, "SOPClassUID", "")) or None
+        except Exception:
+            modality = modality or None
+            sop_uid = sop_uid or None
+    if modality is None:
+        try:
+            r = sitk.ImageFileReader(); r.SetFileName(path); r.ReadImageInformation()
+            if r.HasMetaDataKey("0008|0060"):
+                modality = r.GetMetaData("0008|0060").upper() or None
+        except Exception:
+            modality = modality or None
+    return modality, sop_uid
+
+
 def read_best_series(folder: str, require_modality_ct=True, require_ct_sopclass=False):
     reader = sitk.ImageSeriesReader()
     folder = os.path.abspath(folder)
@@ -215,47 +256,41 @@ def read_best_series(folder: str, require_modality_ct=True, require_ct_sopclass=
         if files:
             candidates.add(root)
 
-    def is_ct_file(path):
-        if not require_modality_ct and not require_ct_sopclass:
-            return True
-        modality_ok = True
-        sop_ok = True
-        if require_modality_ct:
-            if pydicom is not None:
-                try:
-                    ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
-                    modality_ok = (str(getattr(ds, "Modality", "")).upper() == "CT")
-                except Exception:
-                    modality_ok = False
-            else:
-                try:
-                    r = sitk.ImageFileReader(); r.SetFileName(path); r.ReadImageInformation()
-                    modality_ok = r.HasMetaDataKey("0008|0060") and r.GetMetaData("0008|0060").upper() == "CT"
-                except Exception:
-                    modality_ok = False
-        if require_ct_sopclass and pydicom is not None:
-            try:
-                ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
-                sop_uid = str(getattr(ds, "SOPClassUID", ""))
-                sop_ok = sop_uid in {"1.2.840.10008.5.1.4.1.1.2","1.2.840.10008.5.1.4.1.1.2.1"}
-            except Exception:
-                sop_ok = False
-        return modality_ok and sop_ok
-
     best_files, best_len = None, -1
+    found_any_series = False
+    found_modalities = set()
     for path in sorted(candidates):
         try:
             series_ids = reader.GetGDCMSeriesIDs(path) or []
             for uid in series_ids:
                 files = reader.GetGDCMSeriesFileNames(path, uid) or []
-                if not files: continue
-                if not is_ct_file(files[0]): continue
+                if not files:
+                    continue
+                found_any_series = True
+                modality, sop_uid = _get_dicom_tags(files[0])
+                recorded_mod = modality if modality else "Desconocida"
+                found_modalities.add(recorded_mod)
+                modality_ok = True
+                sop_ok = True
+                if require_modality_ct:
+                    modality_ok = (modality == "CT")
+                if require_ct_sopclass:
+                    sop_ok = (sop_uid in {"1.2.840.10008.5.1.4.1.1.2", "1.2.840.10008.5.1.4.1.1.2.1"})
+                if not (modality_ok and sop_ok):
+                    continue
                 if len(files) > best_len:
-                    best_len = len(files); best_files = files
+                    best_len = len(files)
+                    best_files = files
         except Exception:
             continue
     if not best_files:
-        raise RuntimeError(f"NoSeriesFound: No se encontró ninguna serie DICOM en: {folder}")
+        if require_modality_ct and found_modalities:
+            raise NoCTSeriesFound(folder, found_modalities=found_modalities)
+        if not found_any_series:
+            raise NoSeriesFound(folder, "No se encontró ninguna serie DICOM en la carpeta.",
+                                found_modalities=found_modalities, code="no_series")
+        raise NoSeriesFound(folder, "No se encontró una serie DICOM que cumpla los filtros solicitados.",
+                            found_modalities=found_modalities, code="no_match")
     reader.SetFileNames(best_files)
     return reader.Execute(), best_files
 
@@ -829,8 +864,19 @@ def launch_viewer():
         if not new_folder: return
 
         loading_win, _ = _open_loading_popup(_safe_parent_for_tk(fig), "cargando...")
+        fallback_used = False
+        fallback_trigger = None
         try:
-            img, files = read_best_series(new_folder)  # exige CT
+            try:
+                img, files = read_best_series(new_folder)  # exige CT
+            except NoCTSeriesFound as err:
+                fallback_used = True
+                fallback_trigger = err
+                try:
+                    img, files = read_best_series(new_folder, require_modality_ct=False)
+                except NoSeriesFound as inner_err:
+                    setattr(inner_err, "fallback_trigger", err)
+                    raise
             hu = to_hu(img, files[0], file_list=files)
             vol_hu = sitk.GetArrayFromImage(hu)
             state["hu"], state["vol_hu"] = hu, vol_hu
@@ -1016,17 +1062,37 @@ def launch_viewer():
             state["mask_final"]   = sitk.GetArrayFromImage(final_s).astype(np.float32)
 
             show_main_image(); update_hist_window()
-            print(f"[LOAD] Serie DICOM cargada: {new_folder}")
+
+            modality_loaded, _sop_uid = _get_dicom_tags(files[0])
+            modality_label = modality_loaded if modality_loaded else "Desconocida"
+            if fallback_used:
+                print(f"[LOAD] Serie DICOM cargada en fallback (modalidad={modality_label}): {new_folder}")
+            else:
+                print(f"[LOAD] Serie DICOM cargada (modalidad={modality_label}): {new_folder}")
+        except NoSeriesFound as e:
+            _close_loading_popup(loading_win)
+            fallback_trigger = getattr(e, "fallback_trigger", fallback_trigger)
+            if isinstance(e, NoCTSeriesFound) or (fallback_trigger is not None and getattr(e, "code", "") != "no_series"):
+                mods = getattr(fallback_trigger, "found_modalities", None) or getattr(e, "found_modalities", None)
+                if mods:
+                    mods_text = ", ".join(mods)
+                    _show_info_message(f"Se detectaron series DICOM pero ninguna es TC (modalidades: {mods_text}).", title="Aviso")
+                    print(f"[LOAD] No se encontraron series CT en {new_folder}. Modalidades: {mods_text}")
+                else:
+                    _show_info_message("Se detectaron series DICOM pero ninguna es TC.", title="Aviso")
+                    print(f"[LOAD] No se encontraron series CT en {new_folder}. Modalidades: desconocidas")
+            elif getattr(e, "code", "") == "no_series":
+                _show_info_message("La carpeta seleccionada no contiene archivos DICOM válidos.", title="Aviso")
+                print(f"[LOAD] No se encontraron series DICOM en {new_folder}")
+            else:
+                _show_info_message("No se encontró una serie DICOM compatible en la carpeta seleccionada.", title="Aviso")
+                print(f"[LOAD] No se encontró serie compatible en {new_folder}: {e}")
+            return
         except Exception as e:
             # Cerrar el popup de carga ANTES de mostrar el info
             _close_loading_popup(loading_win)
             msg = str(e)
-            if "NoSeriesFound" in msg or "No Series were found" in msg:
-                _show_info_message("La carpeta seleccionada no contiene archivos DICOM válidos.", title="Aviso")
-            elif ("CT válida" in msg) or ("Modality" in msg) or (" CT " in msg) or ("no son TC" in msg):
-                _show_info_message("Las imágenes cargadas no son TC.", title="Aviso")
-            else:
-                _show_info_message(f"Error al cargar:{msg}", title="Error")
+            _show_info_message(f"Error al cargar:{msg}", title="Error")
             print(f"[LOAD] Error al cargar nueva serie: {e}")
             return
         finally:
