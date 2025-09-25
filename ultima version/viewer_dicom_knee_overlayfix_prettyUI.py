@@ -417,47 +417,162 @@ def launch_viewer():
         "min_volume_mm3": 3e5,
     }
 
-    fig, ax = plt.subplots(figsize=(7.5, 7.5)); _deactivate_toolbar(fig)
-    fig.patch.set_facecolor('white')
-    # Panel lateral de controles (fondo suave)
-    ax_panel_bg = fig.add_axes([0.80, 0.02, 0.19, 0.94])
-    ax_panel_bg.add_patch(Rectangle((0,0), 1, 1, transform=ax_panel_bg.transAxes,
-                                    facecolor='#f5f5f7', edgecolor='#e6e6ea'))
-    ax_panel_bg.axis('off')
-    # Encabezado con leyenda rápida de colores
-    ax_hdr = fig.add_axes([0.05, 0.93, 0.74, 0.05]); ax_hdr.axis('off')
-    ax_hdr.text(0.00, 0.5, 'Bone', color='red', va='center', fontsize=11)
-    ax_hdr.text(0.10, 0.5, '∧', color='#444', va='center', fontsize=11)
-    ax_hdr.text(0.15, 0.5, 'Patient', color='green', va='center', fontsize=11)
-    ax_hdr.text(0.30, 0.5, '→  STL 3D cerrado', color='#444', va='center', fontsize=11)
-
-    ax.axis('off')
-    ax.text(0.5, 0.5, "Cargá una carpeta DICOM\ncon el botón 'Cargar DICOM'",
-            ha='center', va='center', fontsize=14, transform=ax.transAxes)
-    plt.subplots_adjust(left=0.05, right=0.82, bottom=0.26, top=0.92)
-    fig.suptitle('Segmentación de rodilla: visualización y STL', fontsize=13)
+    fig, ax = plt.subplots(figsize=(10.5, 7.4)); _deactivate_toolbar(fig)
+    fig.patch.set_facecolor('#f4f6fb')
+    plt.subplots_adjust(left=0.06, right=0.74, bottom=0.24, top=0.90)
+    fig.suptitle('Segmentación de rodilla – visor interactivo', fontsize=14, fontweight='bold')
     state["fig"] = fig; state["axes"]["img"] = ax
 
+    # --- Layout helpers / posiciones ---
+    panel_left, panel_width = 0.76, 0.21
+    panel_bottom, panel_top = 0.05, 0.93
+    slider_left, slider_width = 0.08, 0.64
+    layout = {
+        "panel_left": panel_left,
+        "panel_width": panel_width,
+        "panel_bottom": panel_bottom,
+        "panel_top": panel_top,
+        "slider_coords": {
+            "s_z":   [slider_left, 0.19, slider_width, 0.035],
+            "s_T23": [slider_left, 0.125, slider_width, 0.042],
+            "s_T14": [slider_left, 0.07, slider_width, 0.042],
+        },
+        "panel_coords": {
+            "btnload": [panel_left, 0.845, panel_width, 0.065],
+            "btnhist": [panel_left, 0.775, panel_width, 0.055],
+            "section_seg": [panel_left, 0.725, panel_width, 0.03],
+            "pmh_txt": [panel_left, 0.675, panel_width, 0.05],
+            "pmh_apply": [panel_left, 0.625, panel_width, 0.045],
+            "section_overlay": [panel_left, 0.585, panel_width, 0.03],
+            "ovl": [panel_left, 0.515, panel_width, 0.085],
+            "chk_second": [panel_left, 0.465, panel_width, 0.045],
+            "section_post": [panel_left, 0.425, panel_width, 0.03],
+            "s_sit": [panel_left, 0.375, panel_width, 0.045],
+            "s_pbd": [panel_left, 0.325, panel_width, 0.045],
+            "s_dec": [panel_left, 0.275, panel_width, 0.045],
+            "section_export": [panel_left, 0.225, panel_width, 0.03],
+            "btn3d": [panel_left, 0.175, panel_width, 0.055],
+            "btnstl": [panel_left, 0.11, panel_width, 0.055],
+            "btnval": [panel_left, 0.045, panel_width, 0.055],
+        }
+    }
+    state["layout"] = layout
+
+    # Panel lateral y zona de sliders: fondos suaves
+    ax_panel_bg = fig.add_axes([panel_left - 0.015, panel_bottom - 0.02, panel_width + 0.03, panel_top - panel_bottom + 0.04])
+    ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
+                                    facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
+    ax_panel_bg.axis('off')
+
+    ax_slider_bg = fig.add_axes([slider_left - 0.025, 0.055, slider_width + 0.05, 0.17])
+    ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
+                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
+    ax_slider_bg.axis('off')
+    ax_slider_bg.text(0.02, 0.86, 'Explorar volumen y umbrales HU', fontsize=10.5, color='#111827', fontweight='bold', va='center')
+    ax_slider_bg.text(0.02, 0.60, 'Usá el slider superior para navegar cortes axiales.', fontsize=9, color='#4b5563', va='center')
+    ax_slider_bg.text(0.02, 0.38, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', fontsize=9, color='#4b5563', va='center')
+
+    # Encabezados informativos
+    fig.text(0.06, 0.93, '1. Cargar estudio · 2. Ajustar umbrales · 3. Validar / exportar',
+             fontsize=11, color='#1f2937', weight='bold')
+    fig.text(0.06, 0.905, 'Bone → rojo  |  Paciente → verde  |  STL exportado desde la máscara final',
+             fontsize=10, color='#4b5563')
+
+    # Placeholder inicial en el eje principal
+    ax.set_facecolor('#111827')
+    ax.axis('off')
+    ax.text(0.5, 0.52, "Cargá una carpeta DICOM\ncon el panel derecho",
+            ha='center', va='center', fontsize=15, color='white', transform=ax.transAxes,
+            bbox=dict(boxstyle='round', facecolor='#1f2937', alpha=0.8, pad=0.8))
+
     # Barra de estado inferior
-    ax_status = fig.add_axes([0.05, 0.01, 0.74, 0.03]); ax_status.axis('off')
+    ax_status = fig.add_axes([0.06, 0.03, 0.64, 0.04])
+    ax_status.add_patch(Rectangle((0, 0), 1, 1, transform=ax_status.transAxes,
+                                  facecolor='#eef2ff', edgecolor='#d0d7de'))
+    ax_status.axis('off')
     state['axes']['status'] = ax_status
     def _update_status(msg=None):
-        ax_status.clear(); ax_status.axis('off')
+        ax_status.clear()
+        ax_status.add_patch(Rectangle((0, 0), 1, 1, transform=ax_status.transAxes,
+                                      facecolor='#eef2ff', edgecolor='#d0d7de'))
+        ax_status.axis('off')
         if state['vol_hu'] is not None:
             z = int(state['current_z'])
             overlay_txt = f"Bone={'ON' if state['overlay']['bone'] else 'OFF'} | Patient={'ON' if state['overlay']['patient'] else 'OFF'}"
+            folder_txt = state.get('current_folder', '')
             base = f"Z={z}   |   {overlay_txt}"
+            if folder_txt:
+                base = f"{folder_txt}   |   {base}"
         else:
             base = 'Listo para cargar un estudio DICOM.'
         if msg:
             base += '   |   ' + str(msg)
-        ax_status.text(0.0, 0.5, base, va='center', fontsize=9, color='#333')
+        ax_status.text(0.02, 0.5, base, va='center', fontsize=9.5, color='#1f2937')
         fig.canvas.draw_idle()
 
+    def _style_slider(slider, *, face='#2563eb', track='#dbeafe'):
+        try:
+            slider.ax.set_facecolor('#ffffff')
+        except Exception:
+            pass
+        for attr in ("poly", "track", "hline"):
+            obj = getattr(slider, attr, None)
+            if obj is None:
+                continue
+            try:
+                if attr == "poly":
+                    obj.set_color(face)
+                elif attr == "track":
+                    obj.set_facecolor(track)
+                else:
+                    obj.set_color('#475569')
+            except Exception:
+                continue
+        try:
+            slider.handle.set_color(face)
+        except Exception:
+            pass
+        try:
+            for h in getattr(slider, 'handles', []):
+                h.set_facecolor(face)
+        except Exception:
+            pass
 
-    # Botones fijos
-    ax_btnload = plt.axes([0.82, 0.90, 0.15, 0.05]); btnload = Button(ax_btnload, "Cargar DICOM")
-    ax_btnhist = plt.axes([0.82, 0.83, 0.15, 0.05]); btnhist = Button(ax_btnhist, "Histograma")
+    def _style_button(btn, *, color=None, text_color='#1f2937', size=10, weight='bold'):
+        try:
+            if color is not None and hasattr(btn, 'color'):
+                btn.color = color
+        except Exception:
+            pass
+        try:
+            btn.label.set_fontsize(size)
+            btn.label.set_fontweight(weight)
+            btn.label.set_color(text_color)
+        except Exception:
+            pass
+
+
+    # Botones fijos y secciones del panel
+    coords = layout["panel_coords"]
+    ax_btnload = fig.add_axes(coords["btnload"])
+    btnload = Button(ax_btnload, "Cargar DICOM", color='#2563eb', hovercolor='#1d4ed8')
+    btnload.label.set_color('white'); btnload.label.set_fontsize(11); btnload.label.set_fontweight('bold')
+
+    ax_btnhist = fig.add_axes(coords["btnhist"])
+    btnhist = Button(ax_btnhist, "Histograma", color='#e0f2fe', hovercolor='#bae6fd')
+    btnhist.label.set_color('#1f2937'); btnhist.label.set_fontsize(10)
+
+    ax_section_seg = fig.add_axes(coords["section_seg"]); ax_section_seg.axis('off')
+    ax_section_seg.text(0.0, 0.5, 'Parámetros de segmentación', fontsize=10.5, color='#111827', fontweight='bold', va='center')
+
+    ax_section_overlay = fig.add_axes(coords["section_overlay"]); ax_section_overlay.axis('off')
+    ax_section_overlay.text(0.0, 0.5, 'Visibilidad de máscaras', fontsize=10, color='#1f2937', fontweight='bold', va='center')
+
+    ax_section_post = fig.add_axes(coords["section_post"]); ax_section_post.axis('off')
+    ax_section_post.text(0.0, 0.5, 'Suavizado y refinamiento', fontsize=10, color='#1f2937', fontweight='bold', va='center')
+
+    ax_section_export = fig.add_axes(coords["section_export"]); ax_section_export.axis('off')
+    ax_section_export.text(0.0, 0.5, 'Exportar / validar', fontsize=10, color='#1f2937', fontweight='bold', va='center')
 
     state["widgets"]["btnload"] = btnload
     state["widgets"]["btnhist"] = btnhist
@@ -479,6 +594,7 @@ def launch_viewer():
     def show_main_image():
         if state["vol_hu"] is None: return
         aximg = state["axes"]["img"]; aximg.clear()
+        aximg.set_facecolor('#111827')
         z = int(np.clip(state["current_z"], 0, state["vol_hu"].shape[0]-1))
         sl = state["vol_hu"][z]
         aximg.imshow(sl, cmap="gray", vmin=state["vmin"], vmax=state["vmax"])
@@ -722,62 +838,164 @@ def launch_viewer():
             state["current_z"] = vol_hu.shape[0]//2
 
             # Actualizar título con la carpeta cargada
+            base_name = os.path.basename(new_folder)
+            state["current_folder"] = base_name
             try:
-                fig.suptitle(f'Segmentación de rodilla – {os.path.basename(new_folder)}', fontsize=13)
+                fig.suptitle(f'Segmentación de rodilla – {base_name}', fontsize=13, fontweight='bold')
             except Exception:
                 pass
 
-            if "s_z" not in state["widgets"]:state["axes"]["img"].set_position([0.05, 0.26, 0.77, 0.66])
-            # Controles laterales (derecha)
-            ax_pmh_txt    = fig.add_axes([0.82, 0.60, 0.15, 0.035]); tb_pmh        = TextBox(ax_pmh_txt, "Patient HU >", initial=str(int(state.get("patient_hu_thr",150))))
-            ax_pmh_apply  = fig.add_axes([0.82, 0.56, 0.15, 0.035]); btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU")
+            state["axes"]["img"].set_position([0.06, 0.28, 0.66, 0.60])
 
-            ax_ovl = fig.add_axes([0.82, 0.44, 0.15, 0.07]); chk_ovl = CheckButtons(ax_ovl, ["Ver Bone", "Ver Patient"], [state["overlay"]["bone"], state["overlay"]["patient"]])
-            ax_chk = fig.add_axes([0.82, 0.38, 0.15, 0.05]); chk_2nd  = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
+            coords = state["layout"]["panel_coords"]
+            if not state.get("ui_initialized"):
+                # ---- Controles del panel (creados una sola vez) ----
+                ax_pmh_txt = fig.add_axes(coords["pmh_txt"])
+                tb_pmh = TextBox(ax_pmh_txt, "Patient HU >", initial=str(int(state.get("patient_hu_thr", 150))))
+                try:
+                    tb_pmh.label.set_color('#1f2937'); tb_pmh.label.set_fontsize(9.5)
+                    tb_pmh.text_disp.set_fontsize(10)
+                except Exception:
+                    pass
 
-            ax_sit = fig.add_axes([0.82, 0.34, 0.15, 0.03]); s_sit = Slider(ax_sit, "Smoothing iters", 0, 100, valinit=50, valstep=1)
-            ax_pbd = fig.add_axes([0.82, 0.30, 0.15, 0.03]); s_pbd = Slider(ax_pbd, "Passband", 0.001, 0.1, valinit=0.01)
-            ax_dec = fig.add_axes([0.82, 0.26, 0.15, 0.03]); s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
-            ax_btn3d  = fig.add_axes([0.82, 0.18, 0.15, 0.05]); btn3d  = Button(ax_btn3d,  "3D (VTK)", hovercolor="0.9")
-            ax_btnstl = fig.add_axes([0.82, 0.11, 0.15, 0.05]); btnstl = Button(ax_btnstl, "Guardar STL", hovercolor="0.9")
-            ax_btnval = fig.add_axes([0.82, 0.04, 0.15, 0.05]); btnval = Button(ax_btnval, "Validar (sin GT)", hovercolor="0.9")
+                ax_pmh_apply = fig.add_axes(coords["pmh_apply"])
+                btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU", color='#dcfce7', hovercolor='#bbf7d0')
+                _style_button(btn_pmh_apply, text_color='#166534', size=10)
 
-            # Sliders inferiores (izquierda)
-            ax_z   = fig.add_axes([0.10, 0.16, 0.66, 0.03]); s_z   = Slider(ax_z, "Slice (Z)", 0, vol_hu.shape[0]-1, valinit=state["current_z"], valstep=1)
-            # Superior: estrecho T2–T3 | Inferior: amplio T1–T4
-            ax_T23 = fig.add_axes([0.10, 0.10, 0.66, 0.04]); s_T23 = RangeSlider(ax_T23, "T2–T3 (HU)", -500, 3000, valinit=(300, 1200))
-            ax_T14 = fig.add_axes([0.10, 0.04, 0.66, 0.04]); s_T14 = RangeSlider(ax_T14, "T1–T4 (HU)", -500, 3000, valinit=(150, 2000))
+                ax_ovl = fig.add_axes(coords["ovl"])
+                chk_ovl = CheckButtons(ax_ovl, ["Ver Bone", "Ver Patient"],
+                                      [state["overlay"]["bone"], state["overlay"]["patient"]])
+                ax_ovl.set_facecolor('#ffffff')
+                try:
+                    for lbl, col in zip(chk_ovl.labels, ('#b91c1c', '#047857')):
+                        lbl.set_fontsize(9.5); lbl.set_color(col)
+                    for rect, face in zip(chk_ovl.rectangles, ('#fee2e2', '#dcfce7')):
+                        rect.set_facecolor(face); rect.set_edgecolor('#cbd5f5')
+                except Exception:
+                    pass
 
-            state["widgets"].update({
-                "tb_pmh": tb_pmh, "btn_pmh_apply": btn_pmh_apply,
-                "chk_2nd": chk_2nd, "chk_ovl": chk_ovl,
-                "s_sit": s_sit, "s_pbd": s_pbd, "s_dec": s_dec,
-                "btn3d": btn3d, "btnstl": btnstl, "btnval": btnval,
-                "s_z": s_z, "s_T23": s_T23, "s_T14": s_T14
-            })
+                ax_chk = fig.add_axes(coords["chk_second"])
+                chk_2nd = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
+                ax_chk.set_facecolor('#ffffff')
+                try:
+                    for lbl in chk_2nd.labels:
+                        lbl.set_fontsize(9.5); lbl.set_color('#1f2937')
+                    for rect in chk_2nd.rectangles:
+                        rect.set_facecolor('#f1f5f9'); rect.set_edgecolor('#cbd5f5')
+                except Exception:
+                    pass
 
-            # Ajustar etiquetas de sliders y formatear valtext
-            try:
-                for _s in (s_sit, s_pbd, s_dec, s_z, s_T23, s_T14):
+                ax_sit = fig.add_axes(coords["s_sit"])
+                s_sit = Slider(ax_sit, "Suavizado (iters)", 0, 100, valinit=50, valstep=1)
+                _style_slider(s_sit, face='#f97316', track='#ffedd5')
+
+                ax_pbd = fig.add_axes(coords["s_pbd"])
+                s_pbd = Slider(ax_pbd, "Passband", 0.001, 0.1, valinit=0.01)
+                _style_slider(s_pbd, face='#0ea5e9', track='#dbeafe')
+
+                ax_dec = fig.add_axes(coords["s_dec"])
+                s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
+                _style_slider(s_dec, face='#22c55e', track='#dcfce7')
+
+                ax_btn3d = fig.add_axes(coords["btn3d"])
+                btn3d = Button(ax_btn3d, "Visualizar 3D", color='#ede9fe', hovercolor='#ddd6fe')
+                _style_button(btn3d, text_color='#4c1d95', size=10)
+
+                ax_btnstl = fig.add_axes(coords["btnstl"])
+                btnstl = Button(ax_btnstl, "Guardar STL", color='#fef3c7', hovercolor='#fde68a')
+                _style_button(btnstl, text_color='#92400e', size=10)
+
+                ax_btnval = fig.add_axes(coords["btnval"])
+                btnval = Button(ax_btnval, "Validar (sin GT)", color='#e2e8f0', hovercolor='#cbd5e1')
+                _style_button(btnval, text_color='#111827', size=10)
+
+                slider_axes = {}
+                for key, pos in state["layout"]["slider_coords"].items():
+                    slider_axes[key] = fig.add_axes(pos)
+                state["layout"]["slider_axes"] = slider_axes
+
+                state["widgets"].update({
+                    "tb_pmh": tb_pmh, "btn_pmh_apply": btn_pmh_apply,
+                    "chk_ovl": chk_ovl, "chk_2nd": chk_2nd,
+                    "s_sit": s_sit, "s_pbd": s_pbd, "s_dec": s_dec,
+                    "btn3d": btn3d, "btnstl": btnstl, "btnval": btnval,
+                })
+
+                btn_pmh_apply.on_clicked(on_apply_patient_hu)
+                chk_ovl.on_clicked(on_overlay_clicked)
+                chk_2nd.on_clicked(lambda _evt: recompute_all())
+                btn3d.on_clicked(on_3d)
+                btnstl.on_clicked(on_stl)
+                btnval.on_clicked(on_validate)
+                s_sit.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+                s_pbd.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+                s_dec.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+
+                state["ui_initialized"] = True
+            else:
+                # Actualizar controles existentes
+                tb_pmh = state["widgets"].get("tb_pmh")
+                if tb_pmh is not None:
+                    try:
+                        tb_pmh.set_val(str(int(state.get("patient_hu_thr", 150))))
+                    except Exception:
+                        pass
+                chk_ovl = state["widgets"].get("chk_ovl")
+                if chk_ovl is not None:
+                    desired = [True, True]
+                    for idx, want in enumerate(desired):
+                        cur = chk_ovl.get_status()[idx]
+                        if cur != want:
+                            chk_ovl.set_active(idx)
+                chk_2nd = state["widgets"].get("chk_2nd")
+                if chk_2nd is not None:
+                    if not chk_2nd.get_status()[0]:
+                        chk_2nd.set_active(0)
+
+            slider_axes = state["layout"].get("slider_axes", {})
+            if not slider_axes:
+                slider_axes = {}
+                for key, pos in state["layout"]["slider_coords"].items():
+                    slider_axes[key] = fig.add_axes(pos)
+                state["layout"]["slider_axes"] = slider_axes
+
+            for key in ("s_z", "s_T23", "s_T14"):
+                widget = state["widgets"].pop(key, None)
+                if widget is not None:
+                    try:
+                        widget.disconnect_events()
+                    except Exception:
+                        pass
+                    try:
+                        widget.ax.cla()
+                    except Exception:
+                        pass
+
+            s_z = Slider(slider_axes["s_z"], "Slice (Z)", 0, max(vol_hu.shape[0]-1, 0),
+                         valinit=float(state["current_z"]), valstep=1, color='#0ea5e9')
+            s_T23 = RangeSlider(slider_axes["s_T23"], "T2–T3 (HU)", -500, 3000, valinit=(300, 1200), facecolor='#22c55e')
+            s_T14 = RangeSlider(slider_axes["s_T14"], "T1–T4 (HU)", -500, 3000, valinit=(150, 2000), facecolor='#16a34a')
+
+            for _s in (state["widgets"].get("s_sit"), state["widgets"].get("s_pbd"),
+                       state["widgets"].get("s_dec"), s_z, s_T23, s_T14):
+                if _s is None:
+                    continue
+                try:
                     _s.valtext.set_fontsize(9)
-            except Exception:
-                pass
+                except Exception:
+                    pass
+
+            _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
+            _style_slider(s_T23, face='#22c55e', track='#dcfce7')
+            _style_slider(s_T14, face='#16a34a', track='#d1fae5')
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
             _format_slider_labels()
 
-
-            # Callbacks
             s_T23.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_T14.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_z.on_changed(lambda v: (_format_slider_labels(), on_slice_change(v)))
-            chk_2nd.on_clicked(recompute_all)
-            chk_ovl.on_clicked(on_overlay_clicked)
-            btn3d.on_clicked(on_3d)
-            btnstl.on_clicked(on_stl)
-            btnval.on_clicked(on_validate)
-            s_sit.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            s_pbd.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            s_dec.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            state["widgets"]["btn_pmh_apply"].on_clicked(on_apply_patient_hu)
             use2 = state["widgets"]["chk_2nd"].get_status()[0] if "chk_2nd" in state["widgets"] else True
             (T1v, T4v) = state["widgets"].get("s_T14", type("obj", (), {"val": (150,2000)})()).val
             (T2v, T3v) = state["widgets"].get("s_T23", type("obj", (), {"val": (300,1200)})()).val
