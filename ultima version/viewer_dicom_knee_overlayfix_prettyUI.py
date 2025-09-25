@@ -462,82 +462,87 @@ def launch_viewer():
     # --- Layout helpers / posiciones ---
     panel_left, panel_width = 0.74, 0.23
     slider_left, slider_width = 0.08, 0.64
-    panel_top, min_panel_bottom = 0.90, 0.05
 
-    # Layout dinámico del panel para evitar superposiciones entre elementos
-    panel_coords = {}
-    slots = [
-        ("btnload", 0.075, 0.016),
-        ("btnhist", 0.060, 0.018),
-        ("section_seg", 0.032, 0.008),
-        ("pmh_txt", 0.070, 0.010),
-        ("pmh_apply", 0.055, 0.016),
-        ("section_overlay", 0.030, 0.008),
-        ("ovl", 0.095, 0.014),
-        ("chk_second", 0.060, 0.016),
-        ("section_post", 0.030, 0.008),
-        ("s_sit", 0.060, 0.012),
-        ("s_pbd", 0.060, 0.012),
-        ("s_dec", 0.060, 0.020),
-        ("section_export", 0.030, 0.008),
-        ("btn3d", 0.060, 0.012),
-        ("btnstl", 0.060, 0.012),
-        ("btnval", 0.060, 0.0),
-    ]
+    def _build_panel_layout():
+        panel_top, min_panel_bottom = 0.90, 0.05
+        slots = [
+            ("btnload", 0.075, 0.016),
+            ("btnhist", 0.060, 0.018),
+            ("section_seg", 0.032, 0.008),
+            ("pmh_txt", 0.070, 0.010),
+            ("pmh_apply", 0.055, 0.016),
+            ("section_overlay", 0.030, 0.008),
+            ("ovl", 0.095, 0.014),
+            ("chk_second", 0.060, 0.016),
+            ("section_post", 0.030, 0.008),
+            ("s_sit", 0.060, 0.012),
+            ("s_pbd", 0.060, 0.012),
+            ("s_dec", 0.060, 0.020),
+            ("section_export", 0.030, 0.008),
+            ("btn3d", 0.060, 0.012),
+            ("btnstl", 0.060, 0.012),
+            ("btnval", 0.060, 0.0),
+        ]
 
-    total_consumption = sum(height + gap for _, height, gap in slots)
-    max_available = panel_top - min_panel_bottom
-    if total_consumption > max_available:
-        factor = max_available / total_consumption
-    else:
-        factor = 1.0
+        total_consumption = sum(height + gap for _, height, gap in slots)
+        max_available = panel_top - min_panel_bottom
+        factor = max_available / total_consumption if total_consumption > max_available else 1.0
 
-    _panel_cursor = panel_top
+        cursor = panel_top
+        panel_coords = {}
+        for name, height, gap in slots:
+            height_scaled = height * factor
+            gap_scaled = gap * factor
+            cursor -= height_scaled
+            panel_coords[name] = [panel_left, cursor, panel_width, height_scaled]
+            cursor -= gap_scaled
 
-    def _add_panel_slot(name, height, gap):
-        nonlocal _panel_cursor
-        height_scaled = height * factor
-        gap_scaled = gap * factor
-        _panel_cursor -= height_scaled
-        panel_coords[name] = [panel_left, _panel_cursor, panel_width, height_scaled]
-        _panel_cursor -= gap_scaled
+        panel_bottom = max(cursor - 0.02, min_panel_bottom)
 
-    for name, height, gap in slots:
-        _add_panel_slot(name, height, gap)
+        return {
+            "panel_left": panel_left,
+            "panel_width": panel_width,
+            "panel_bottom": panel_bottom,
+            "panel_top": panel_top,
+            "panel_coords": panel_coords,
+            "slider_coords": {
+                "s_z":   [slider_left, 0.23, slider_width, 0.040],
+                "s_T23": [slider_left, 0.150, slider_width, 0.045],
+                "s_T14": [slider_left, 0.070, slider_width, 0.045],
+            },
+            "panel_bg": [panel_left - 0.015, panel_bottom - 0.02,
+                          panel_width + 0.03, panel_top - panel_bottom + 0.07],
+            "slider_bg": [slider_left - 0.025, 0.045, slider_width + 0.05, 0.25],
+        }
 
-    panel_bottom = max(_panel_cursor - 0.02, min_panel_bottom)
-
-    layout = {
-        "panel_left": panel_left,
-        "panel_width": panel_width,
-        "panel_bottom": panel_bottom,
-        "panel_top": panel_top,
-        "slider_coords": {
-            "s_z":   [slider_left, 0.23, slider_width, 0.040],
-            "s_T23": [slider_left, 0.150, slider_width, 0.045],
-            "s_T14": [slider_left, 0.070, slider_width, 0.045],
-        },
-        "panel_coords": panel_coords,
-    }
+    layout = _build_panel_layout()
     state["layout"] = layout
 
     # Panel lateral y zona de sliders: fondos suaves
-    ax_panel_bg = fig.add_axes([panel_left - 0.015, panel_bottom - 0.02,
-                                panel_width + 0.03, 0.90 - panel_bottom + 0.05])
+    ax_panel_bg = fig.add_axes(layout["panel_bg"])
     ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_panel_bg.axis('off')
 
-    ax_slider_bg = fig.add_axes([slider_left - 0.025, 0.045, slider_width + 0.05, 0.25])
+    ax_slider_bg = fig.add_axes(layout["slider_bg"])
     ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
                                      facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_slider_bg.axis('off')
-    ax_slider_bg.text(0.03, 0.88, 'Explorar volumen y umbrales HU', fontsize=10.5,
-                      color='#111827', fontweight='bold', va='center')
-    ax_slider_bg.text(0.03, 0.64, 'Usá el slider superior para navegar cortes axiales.', fontsize=9.2,
-                      color='#4b5563', va='center')
-    ax_slider_bg.text(0.03, 0.42, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', fontsize=9.2,
-                      color='#4b5563', va='center')
+    slider_texts = (
+        (0.88, 'Explorar volumen y umbrales HU', 10.5, True),
+        (0.64, 'Usá el slider superior para navegar cortes axiales.', 9.2, False),
+        (0.42, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', 9.2, False),
+    )
+    for y, msg, size, is_title in slider_texts:
+        ax_slider_bg.text(
+            0.03,
+            y,
+            msg,
+            fontsize=size,
+            color='#111827' if is_title else '#4b5563',
+            fontweight='bold' if is_title else 'normal',
+            va='center',
+        )
 
     # Encabezado informativo con fondo
     ax_header = fig.add_axes([0.055, 0.895, 0.66, 0.085])
