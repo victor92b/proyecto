@@ -452,6 +452,7 @@ def launch_viewer():
         "min_volume_mm3": 3e5,
     }
 
+
     fig, ax = plt.subplots(figsize=(10.5, 7.4)); _deactivate_toolbar(fig)
     fig.patch.set_facecolor('#f4f6fb')
     plt.subplots_adjust(left=0.06, right=0.74, bottom=0.24, top=0.90)
@@ -890,6 +891,7 @@ def launch_viewer():
                 fig.suptitle(f'Segmentación de rodilla – {base_name}', fontsize=13, fontweight='bold')
             except Exception:
                 pass
+
 
             state["axes"]["img"].set_position([0.06, 0.28, 0.66, 0.60])
 
