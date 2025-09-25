@@ -628,6 +628,7 @@ def launch_viewer():
         except Exception:
             pass
 
+
     def _style_button(btn, *, color=None, text_color='#1f2937', size=10, weight='bold'):
         try:
             if color is not None and hasattr(btn, 'color'):
@@ -651,19 +652,23 @@ def launch_viewer():
             n_rects = len(chk.rectangles)
             facecolors = facecolors or []
             label_colors = label_colors or []
+
             for idx, rect in enumerate(chk.rectangles):
                 cy = rect.get_y() + rect.get_height() * 0.5
                 rect.set_width(0.24)
                 rect.set_height(0.44)
                 rect.set_x(0.05)
+
                 rect.set_y(cy - rect.get_height() * 0.5)
                 rect.set_edgecolor('#94a3b8')
                 rect.set_linewidth(1.1)
                 if idx < len(facecolors) and facecolors[idx] is not None:
                     rect.set_facecolor(facecolors[idx])
+
             for idx, lbl in enumerate(chk.labels):
                 lbl.set_fontsize(label_size)
                 lbl.set_x(0.36)
+
                 if idx < len(label_colors) and label_colors[idx] is not None:
                     lbl.set_color(label_colors[idx])
             for idx, line in enumerate(getattr(chk, 'lines', [])):
@@ -682,8 +687,10 @@ def launch_viewer():
                 line.set_linewidth(1.1)
                 line.set_color('#0f172a')
             try:
+
                 chk.ax.set_xlim(0, 1.05)
                 chk.ax.set_ylim(-0.1, len(chk.rectangles) - 0.1)
+
             except Exception:
                 pass
         except Exception:
@@ -996,7 +1003,9 @@ def launch_viewer():
                 pass
 
 
+
             state["axes"]["img"].set_position([0.06, 0.29, 0.66, 0.57])
+
 
 
             coords = state["layout"]["panel_coords"]
@@ -1137,7 +1146,6 @@ def launch_viewer():
                 except Exception:
                     pass
 
-
             _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
             _style_slider(s_T23, face='#22c55e', track='#dcfce7')
             _style_slider(s_T14, face='#16a34a', track='#d1fae5')
@@ -1145,7 +1153,17 @@ def launch_viewer():
             state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
 
 
+            _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
+            _style_slider(s_T23, face='#22c55e', track='#dcfce7')
+            _style_slider(s_T14, face='#16a34a', track='#d1fae5')
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
             _format_slider_labels()
+
+
+            _format_slider_labels()
+
 
             s_T23.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_T14.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
