@@ -466,8 +466,10 @@ def launch_viewer():
     def _build_panel_layout():
         panel_top, min_panel_bottom = 0.90, 0.05
 
+
         info_height = 0.0
         info_gap = 0.0
+
 
         controls_top = panel_top - info_height - info_gap
         slots = [
@@ -1002,9 +1004,24 @@ def launch_viewer():
             _close_loading_popup(loading_win)
 
     def on_load(_event=None):
-        root = tk.Tk(); root.withdraw()
-        new_folder = filedialog.askdirectory(title="Seleccionar carpeta DICOM")
-        root.destroy()
+        dialog_parent = _safe_parent_for_tk(fig)
+        temp_root = None
+        try:
+            if dialog_parent is None:
+                temp_root = tk.Tk()
+                try:
+                    temp_root.withdraw()
+                except Exception:
+                    pass
+                dialog_parent = temp_root
+            new_folder = filedialog.askdirectory(title="Seleccionar carpeta DICOM",
+                                                 parent=dialog_parent)
+        finally:
+            if temp_root is not None:
+                try:
+                    temp_root.destroy()
+                except Exception:
+                    pass
         if not new_folder: return
 
         loading_win, _ = _open_loading_popup(_safe_parent_for_tk(fig), "cargando...")
@@ -1099,12 +1116,11 @@ def launch_viewer():
                 s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
                 _style_slider(s_dec, face='#22c55e', track='#dcfce7')
 
-
                 for _ax in (ax_sit, ax_pbd, ax_dec):
                     _ax.set_facecolor('none')
                     for spine in _ax.spines.values():
                         spine.set_alpha(0)
-                        
+
                 ax_btn3d = fig.add_axes(coords["btn3d"])
                 btn3d = Button(ax_btn3d, "Visualizar 3D", color='#ede9fe', hovercolor='#ddd6fe')
                 _style_button(btn3d, text_color='#4c1d95', size=10)
