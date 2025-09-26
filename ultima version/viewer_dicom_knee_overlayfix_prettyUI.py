@@ -465,8 +465,10 @@ def launch_viewer():
 
     def _build_panel_layout():
         panel_top, min_panel_bottom = 0.90, 0.05
-        info_height = 0.0
-        info_gap = 0.0
+
+        info_height = 0.12
+        info_gap = 0.015
+
         controls_top = panel_top - info_height - info_gap
         slots = [
             ("btnload", 0.075, 0.016),
@@ -516,39 +518,57 @@ def launch_viewer():
             "panel_bg": [panel_left - 0.015, panel_bottom - 0.02,
                           panel_width + 0.03, panel_top - panel_bottom + 0.07],
             "slider_bg": [slider_left - 0.025, 0.040, slider_width + 0.05, 0.235],
+
+            "slider_info": [panel_left - 0.005, panel_top - info_height, panel_width + 0.01, info_height],
         }
 
     layout = _build_panel_layout()
     state["layout"] = layout
 
-    def _add_shadow(fig_obj, rect, *, offset=(0.01, -0.012), alpha=0.12, expand=0.0):
-        x, y, w, h = rect
-        ox, oy = offset
-        shadow_rect = [x + ox - expand, y + oy - expand, w + expand * 2, h + expand * 2]
-        ax_shadow = fig_obj.add_axes(shadow_rect)
-        ax_shadow.add_patch(Rectangle((0, 0), 1, 1, transform=ax_shadow.transAxes,
-                                      facecolor='black', alpha=alpha, linewidth=0))
-        ax_shadow.set_zorder(0.2)
-        ax_shadow.axis('off')
-        return ax_shadow
-
     # Panel lateral y zona de sliders: fondos suaves
-    _ = _add_shadow(fig, layout["panel_bg"], offset=(0.012, -0.014), alpha=0.18, expand=0.01)
     ax_panel_bg = fig.add_axes(layout["panel_bg"])
+
+
+
     ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_panel_bg.axis('off')
 
-    _ = _add_shadow(fig, layout["slider_bg"], offset=(0.008, -0.010), alpha=0.12, expand=0.006)
+
+
+    ax_slider_info = fig.add_axes(layout["slider_info"])
+    ax_slider_info.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_info.transAxes,
+                                       facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
+    ax_slider_info.axis('off')
+    slider_texts = (
+        (0.76, 'Explorar volumen y umbrales HU', 10.5, True),
+        (0.44, 'Usá el slider superior para navegar cortes axiales.', 9.0, False),
+        (0.22, 'Los rangos T1–T4 y T2–T3 afinan la máscara ósea.', 9.0, False),
+
+
+    )
+    for y, msg, size, is_title in slider_texts:
+        ax_slider_info.text(
+            0.05,
+            y,
+            msg,
+            fontsize=size,
+            color='#111827' if is_title else '#4b5563',
+            fontweight='bold' if is_title else 'normal',
+            va='center',
+        )
+
+
     ax_slider_bg = fig.add_axes(layout["slider_bg"])
     ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
                                      facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_slider_bg.axis('off')
 
     # Encabezado informativo con fondo
-    header_rect = [0.055, 0.895, 0.66, 0.085]
-    _ = _add_shadow(fig, header_rect, offset=(0.006, -0.008), alpha=0.12, expand=0.004)
-    ax_header = fig.add_axes(header_rect)
+
+    ax_header = fig.add_axes([0.055, 0.895, 0.66, 0.085])
+
+
     ax_header.add_patch(Rectangle((0, 0), 1, 1, transform=ax_header.transAxes,
                                   facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.1))
     ax_header.axis('off')
@@ -557,11 +577,7 @@ def launch_viewer():
     ax_header.text(0.03, 0.30,
                    'Bone → rojo   |   Paciente → verde   |   STL exportado desde la máscara final',
                    fontsize=9.6, color='#4b5563', va='center')
-    ax_header.text(0.97, 0.30, 'Atajos: ← → para navegar slices', fontsize=8.6, color='#6b7280',
-                   va='center', ha='right')
 
-    fig.text(0.98, 0.93, 'Panel de control', fontsize=10, color='#1f2937', ha='right', va='center',
-             fontweight='bold')
 
     # Placeholder inicial en el eje principal
     ax.set_facecolor('#111827')
@@ -623,22 +639,6 @@ def launch_viewer():
         except Exception:
             pass
 
-        try:
-            slider.label.set_color('#0f172a')
-            slider.label.set_fontweight('bold')
-        except Exception:
-            pass
-        val_box = getattr(slider, 'valtext', None)
-        if val_box is not None:
-            try:
-                val_box.set_color('#0f172a')
-                val_box.set_bbox(dict(boxstyle='round,pad=0.24', facecolor='#f1f5f9', edgecolor='#cbd5e1'))
-                val_box.set_fontsize(9.2)
-                val_box.set_ha('right')
-                val_box.set_va('center')
-                val_box.set_position((0.96, 0.5))
-            except Exception:
-                pass
 
     def _style_button(btn, *, color=None, text_color='#1f2937', size=10, weight='bold'):
         try:
@@ -662,34 +662,25 @@ def launch_viewer():
             n_rects = len(chk.rectangles)
             facecolors = facecolors or []
             label_colors = label_colors or []
-            square = 0.28
-            extra_gap = 0.18
-            max_top = 0.0
-            try:
-                chk.ax.set_aspect('equal', adjustable='box')
-            except Exception:
-                try:
-                    chk.ax.set_box_aspect(1.0)
-                except Exception:
-                    pass
+
+
             for idx, rect in enumerate(chk.rectangles):
-                cy = rect.get_y() + rect.get_height() * 0.5 + idx * extra_gap
-                rect.set_width(square)
-                rect.set_height(square)
-                rect.set_x(0.1)
+                cy = rect.get_y() + rect.get_height() * 0.5
+                rect.set_width(0.24)
+                rect.set_height(0.44)
+                rect.set_x(0.05)
+
                 rect.set_y(cy - rect.get_height() * 0.5)
                 rect.set_edgecolor('#94a3b8')
                 rect.set_linewidth(1.1)
                 if idx < len(facecolors) and facecolors[idx] is not None:
                     rect.set_facecolor(facecolors[idx])
-                max_top = max(max_top, rect.get_y() + rect.get_height())
+
+
             for idx, lbl in enumerate(chk.labels):
                 lbl.set_fontsize(label_size)
-                lbl.set_x(0.5)
-                try:
-                    lbl.set_y(chk.rectangles[idx].get_y() + chk.rectangles[idx].get_height() * 0.5)
-                except Exception:
-                    pass
+                lbl.set_x(0.36)
+
                 if idx < len(label_colors) and label_colors[idx] is not None:
                     lbl.set_color(label_colors[idx])
             for idx, line in enumerate(getattr(chk, 'lines', [])):
@@ -708,8 +699,9 @@ def launch_viewer():
                 line.set_linewidth(1.1)
                 line.set_color('#0f172a')
             try:
-                chk.ax.set_xlim(0, 1.18)
-                chk.ax.set_ylim(-0.08, max_top + 0.16)
+                chk.ax.set_xlim(0, 1.05)
+                chk.ax.set_ylim(-0.1, len(chk.rectangles) - 0.1)
+
             except Exception:
                 pass
         except Exception:
@@ -1022,6 +1014,7 @@ def launch_viewer():
 
             state["axes"]["img"].set_position([0.06, 0.29, 0.66, 0.57])
 
+
             coords = state["layout"]["panel_coords"]
             if not state.get("ui_initialized"):
                 # ---- Controles del panel (creados una sola vez) ----
@@ -1030,14 +1023,10 @@ def launch_viewer():
                 try:
                     tb_pmh.label.set_color('#1f2937'); tb_pmh.label.set_fontsize(9.5)
                     tb_pmh.text_disp.set_fontsize(10)
-                    tb_pmh.text_disp.set_color('#0f172a')
-                    tb_pmh.text_disp.set_bbox(dict(boxstyle='round,pad=0.24', facecolor='#f8fafc', edgecolor='#cbd5e1'))
+
                 except Exception:
                     pass
-                ax_pmh_txt.set_facecolor('none')
-                for spine in ax_pmh_txt.spines.values():
-                    spine.set_color('#d0d7de')
-                    spine.set_linewidth(1.1)
+
 
                 ax_pmh_apply = fig.add_axes(coords["pmh_apply"])
                 btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU", color='#dcfce7', hovercolor='#bbf7d0')
@@ -1054,8 +1043,7 @@ def launch_viewer():
                 _style_checkbuttons(chk_ovl,
                                     label_colors=['#b91c1c', '#047857'],
                                     facecolors=['#fee2e2', '#dcfce7'])
-                ax_ovl_bg.text(0.5, 1.08, 'Activar superposiciones', fontsize=8.8, color='#475569',
-                                ha='center', va='bottom')
+
 
                 ax_chk_bg = fig.add_axes(coords["chk_second"])
                 ax_chk_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_chk_bg.transAxes,
@@ -1065,8 +1053,7 @@ def launch_viewer():
                 chk_2nd = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
                 ax_chk.set_facecolor('none')
                 _style_checkbuttons(chk_2nd, label_colors=['#1f2937'], facecolors=['#e2e8f0'])
-                ax_chk_bg.text(0.5, 1.08, 'Máscaras avanzadas', fontsize=8.6, color='#475569',
-                               ha='center', va='bottom')
+
 
                 ax_sit = fig.add_axes(coords["s_sit"])
                 s_sit = Slider(ax_sit, "Suavizado (iters)", 0, 100, valinit=50, valstep=1)
@@ -1079,11 +1066,6 @@ def launch_viewer():
                 ax_dec = fig.add_axes(coords["s_dec"])
                 s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
                 _style_slider(s_dec, face='#22c55e', track='#dcfce7')
-
-                for _ax in (ax_sit, ax_pbd, ax_dec):
-                    _ax.set_facecolor('none')
-                    for spine in _ax.spines.values():
-                        spine.set_alpha(0)
 
                 ax_btn3d = fig.add_axes(coords["btn3d"])
                 btn3d = Button(ax_btn3d, "Visualizar 3D", color='#ede9fe', hovercolor='#ddd6fe')
@@ -1176,6 +1158,38 @@ def launch_viewer():
             _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
             _style_slider(s_T23, face='#22c55e', track='#dcfce7')
             _style_slider(s_T14, face='#16a34a', track='#d1fae5')
+
+
+
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
+
+            _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
+            _style_slider(s_T23, face='#22c55e', track='#dcfce7')
+            _style_slider(s_T14, face='#16a34a', track='#d1fae5')
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
+            _format_slider_labels()
+
+
+            slider_axes["s_z"].text(0.98, -0.55, 'Consejo: mantené clic y arrastrá para vista rápida',
+                                     transform=slider_axes["s_z"].transAxes, ha='right', va='center',
+                                     fontsize=8.2, color='#64748b')
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
+            _format_slider_labels()
+
+
+            _format_slider_labels()
+
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
+            _format_slider_labels()
+
 
             state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
 
