@@ -465,8 +465,10 @@ def launch_viewer():
 
     def _build_panel_layout():
         panel_top, min_panel_bottom = 0.90, 0.05
+
         info_height = 0.12
         info_gap = 0.015
+
         controls_top = panel_top - info_height - info_gap
         slots = [
             ("btnload", 0.075, 0.016),
@@ -516,21 +518,22 @@ def launch_viewer():
             "panel_bg": [panel_left - 0.015, panel_bottom - 0.02,
                           panel_width + 0.03, panel_top - panel_bottom + 0.07],
             "slider_bg": [slider_left - 0.025, 0.040, slider_width + 0.05, 0.235],
+
             "slider_info": [panel_left - 0.005, panel_top - info_height, panel_width + 0.01, info_height],
         }
 
     layout = _build_panel_layout()
     state["layout"] = layout
 
-
-
     # Panel lateral y zona de sliders: fondos suaves
     ax_panel_bg = fig.add_axes(layout["panel_bg"])
+
 
 
     ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_panel_bg.axis('off')
+
 
 
     ax_slider_info = fig.add_axes(layout["slider_info"])
@@ -555,12 +558,14 @@ def launch_viewer():
             va='center',
         )
 
+
     ax_slider_bg = fig.add_axes(layout["slider_bg"])
     ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
                                      facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
     ax_slider_bg.axis('off')
 
     # Encabezado informativo con fondo
+
     ax_header = fig.add_axes([0.055, 0.895, 0.66, 0.085])
 
 
@@ -572,6 +577,7 @@ def launch_viewer():
     ax_header.text(0.03, 0.30,
                    'Bone → rojo   |   Paciente → verde   |   STL exportado desde la máscara final',
                    fontsize=9.6, color='#4b5563', va='center')
+
 
     # Placeholder inicial en el eje principal
     ax.set_facecolor('#111827')
@@ -633,6 +639,7 @@ def launch_viewer():
         except Exception:
             pass
 
+
     def _style_button(btn, *, color=None, text_color='#1f2937', size=10, weight='bold'):
         try:
             if color is not None and hasattr(btn, 'color'):
@@ -646,7 +653,6 @@ def launch_viewer():
         except Exception:
             pass
 
-
     def _inset_axes(pos, pad_x=0.012, pad_y=0.008):
         x, y, w, h = pos
         return [x + pad_x, y + pad_y, max(w - 2 * pad_x, 0.01), max(h - 2 * pad_y, 0.01)]
@@ -656,6 +662,7 @@ def launch_viewer():
             n_rects = len(chk.rectangles)
             facecolors = facecolors or []
             label_colors = label_colors or []
+
 
             for idx, rect in enumerate(chk.rectangles):
                 cy = rect.get_y() + rect.get_height() * 0.5
@@ -668,6 +675,7 @@ def launch_viewer():
                 rect.set_linewidth(1.1)
                 if idx < len(facecolors) and facecolors[idx] is not None:
                     rect.set_facecolor(facecolors[idx])
+
 
             for idx, lbl in enumerate(chk.labels):
                 lbl.set_fontsize(label_size)
@@ -691,10 +699,8 @@ def launch_viewer():
                 line.set_linewidth(1.1)
                 line.set_color('#0f172a')
             try:
-
                 chk.ax.set_xlim(0, 1.05)
                 chk.ax.set_ylim(-0.1, len(chk.rectangles) - 0.1)
-
 
             except Exception:
                 pass
@@ -1022,7 +1028,6 @@ def launch_viewer():
                     pass
 
 
-
                 ax_pmh_apply = fig.add_axes(coords["pmh_apply"])
                 btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU", color='#dcfce7', hovercolor='#bbf7d0')
                 _style_button(btn_pmh_apply, text_color='#166534', size=10)
@@ -1039,6 +1044,7 @@ def launch_viewer():
                                     label_colors=['#b91c1c', '#047857'],
                                     facecolors=['#fee2e2', '#dcfce7'])
 
+
                 ax_chk_bg = fig.add_axes(coords["chk_second"])
                 ax_chk_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_chk_bg.transAxes,
                                                facecolor='#f8fafc', edgecolor='#d0d7de', linewidth=1.0))
@@ -1047,6 +1053,7 @@ def launch_viewer():
                 chk_2nd = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
                 ax_chk.set_facecolor('none')
                 _style_checkbuttons(chk_2nd, label_colors=['#1f2937'], facecolors=['#e2e8f0'])
+
 
                 ax_sit = fig.add_axes(coords["s_sit"])
                 s_sit = Slider(ax_sit, "Suavizado (iters)", 0, 100, valinit=50, valstep=1)
@@ -1154,6 +1161,7 @@ def launch_viewer():
 
 
 
+
             state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
 
 
@@ -1182,6 +1190,10 @@ def launch_viewer():
 
             _format_slider_labels()
 
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
+            _format_slider_labels()
 
             s_T23.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_T14.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
