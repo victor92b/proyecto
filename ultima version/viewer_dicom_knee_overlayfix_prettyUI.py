@@ -207,6 +207,47 @@ try:
 except Exception:
     pydicom = None
 
+
+class NoSeriesFound(RuntimeError):
+    def __init__(self, folder: str, reason: str, found_modalities=None, code: str = "no_series"):
+        self.folder = folder
+        self.reason = reason
+        self.code = code
+        self.found_modalities = tuple(sorted(set(found_modalities or [])))
+        msg_reason = reason.strip()
+        super().__init__(f"NoSeriesFound: {msg_reason} -> {folder}")
+
+
+class NoCTSeriesFound(NoSeriesFound):
+    def __init__(self, folder: str, found_modalities=None):
+        reason = "Solo se encontraron series no-CT"
+        if found_modalities:
+            listed = ", ".join(sorted(set(found_modalities)))
+            reason = f"Solo se encontraron series no-CT (modalidades: {listed})"
+        super().__init__(folder, reason, found_modalities=found_modalities, code="no_ct")
+
+
+def _get_dicom_tags(path):
+    modality = None
+    sop_uid = None
+    if pydicom is not None:
+        try:
+            ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
+            modality = str(getattr(ds, "Modality", "")).upper() or None
+            sop_uid = str(getattr(ds, "SOPClassUID", "")) or None
+        except Exception:
+            modality = modality or None
+            sop_uid = sop_uid or None
+    if modality is None:
+        try:
+            r = sitk.ImageFileReader(); r.SetFileName(path); r.ReadImageInformation()
+            if r.HasMetaDataKey("0008|0060"):
+                modality = r.GetMetaData("0008|0060").upper() or None
+        except Exception:
+            modality = modality or None
+    return modality, sop_uid
+
+
 def read_best_series(folder: str, require_modality_ct=True, require_ct_sopclass=False):
     reader = sitk.ImageSeriesReader()
     folder = os.path.abspath(folder)
@@ -215,47 +256,41 @@ def read_best_series(folder: str, require_modality_ct=True, require_ct_sopclass=
         if files:
             candidates.add(root)
 
-    def is_ct_file(path):
-        if not require_modality_ct and not require_ct_sopclass:
-            return True
-        modality_ok = True
-        sop_ok = True
-        if require_modality_ct:
-            if pydicom is not None:
-                try:
-                    ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
-                    modality_ok = (str(getattr(ds, "Modality", "")).upper() == "CT")
-                except Exception:
-                    modality_ok = False
-            else:
-                try:
-                    r = sitk.ImageFileReader(); r.SetFileName(path); r.ReadImageInformation()
-                    modality_ok = r.HasMetaDataKey("0008|0060") and r.GetMetaData("0008|0060").upper() == "CT"
-                except Exception:
-                    modality_ok = False
-        if require_ct_sopclass and pydicom is not None:
-            try:
-                ds = pydicom.dcmread(path, stop_before_pixels=True, force=True)
-                sop_uid = str(getattr(ds, "SOPClassUID", ""))
-                sop_ok = sop_uid in {"1.2.840.10008.5.1.4.1.1.2","1.2.840.10008.5.1.4.1.1.2.1"}
-            except Exception:
-                sop_ok = False
-        return modality_ok and sop_ok
-
     best_files, best_len = None, -1
+    found_any_series = False
+    found_modalities = set()
     for path in sorted(candidates):
         try:
             series_ids = reader.GetGDCMSeriesIDs(path) or []
             for uid in series_ids:
                 files = reader.GetGDCMSeriesFileNames(path, uid) or []
-                if not files: continue
-                if not is_ct_file(files[0]): continue
+                if not files:
+                    continue
+                found_any_series = True
+                modality, sop_uid = _get_dicom_tags(files[0])
+                recorded_mod = modality if modality else "Desconocida"
+                found_modalities.add(recorded_mod)
+                modality_ok = True
+                sop_ok = True
+                if require_modality_ct:
+                    modality_ok = (modality == "CT")
+                if require_ct_sopclass:
+                    sop_ok = (sop_uid in {"1.2.840.10008.5.1.4.1.1.2", "1.2.840.10008.5.1.4.1.1.2.1"})
+                if not (modality_ok and sop_ok):
+                    continue
                 if len(files) > best_len:
-                    best_len = len(files); best_files = files
+                    best_len = len(files)
+                    best_files = files
         except Exception:
             continue
     if not best_files:
-        raise RuntimeError(f"NoSeriesFound: No se encontró ninguna serie DICOM en: {folder}")
+        if require_modality_ct and found_modalities:
+            raise NoCTSeriesFound(folder, found_modalities=found_modalities)
+        if not found_any_series:
+            raise NoSeriesFound(folder, "No se encontró ninguna serie DICOM en la carpeta.",
+                                found_modalities=found_modalities, code="no_series")
+        raise NoSeriesFound(folder, "No se encontró una serie DICOM que cumpla los filtros solicitados.",
+                            found_modalities=found_modalities, code="no_match")
     reader.SetFileNames(best_files)
     return reader.Execute(), best_files
 
@@ -417,47 +452,291 @@ def launch_viewer():
         "min_volume_mm3": 3e5,
     }
 
-    fig, ax = plt.subplots(figsize=(7.5, 7.5)); _deactivate_toolbar(fig)
-    fig.patch.set_facecolor('white')
-    # Panel lateral de controles (fondo suave)
-    ax_panel_bg = fig.add_axes([0.80, 0.02, 0.19, 0.94])
-    ax_panel_bg.add_patch(Rectangle((0,0), 1, 1, transform=ax_panel_bg.transAxes,
-                                    facecolor='#f5f5f7', edgecolor='#e6e6ea'))
-    ax_panel_bg.axis('off')
-    # Encabezado con leyenda rápida de colores
-    ax_hdr = fig.add_axes([0.05, 0.93, 0.74, 0.05]); ax_hdr.axis('off')
-    ax_hdr.text(0.00, 0.5, 'Bone', color='red', va='center', fontsize=11)
-    ax_hdr.text(0.10, 0.5, '∧', color='#444', va='center', fontsize=11)
-    ax_hdr.text(0.15, 0.5, 'Patient', color='green', va='center', fontsize=11)
-    ax_hdr.text(0.30, 0.5, '→  STL 3D cerrado', color='#444', va='center', fontsize=11)
-
-    ax.axis('off')
-    ax.text(0.5, 0.5, "Cargá una carpeta DICOM\ncon el botón 'Cargar DICOM'",
-            ha='center', va='center', fontsize=14, transform=ax.transAxes)
-    plt.subplots_adjust(left=0.05, right=0.82, bottom=0.26, top=0.92)
-    fig.suptitle('Segmentación de rodilla: visualización y STL', fontsize=13)
+    fig, ax = plt.subplots(figsize=(11.2, 7.8)); _deactivate_toolbar(fig)
+    fig.patch.set_facecolor('#f4f6fb')
+    plt.subplots_adjust(left=0.06, right=0.73, bottom=0.20, top=0.89)
+    fig.suptitle('Segmentación de rodilla – visor interactivo', fontsize=14, fontweight='bold', y=0.98)
+    ax.set_position([0.06, 0.29, 0.66, 0.57])
     state["fig"] = fig; state["axes"]["img"] = ax
 
+    # --- Layout helpers / posiciones ---
+    panel_left, panel_width = 0.74, 0.23
+    slider_left, slider_width = 0.08, 0.64
+
+    def _build_panel_layout():
+        panel_top, min_panel_bottom = 0.90, 0.05
+        info_height = 0.0
+        info_gap = 0.0
+        controls_top = panel_top - info_height - info_gap
+        slots = [
+            ("btnload", 0.075, 0.016),
+            ("btnhist", 0.060, 0.018),
+            ("section_seg", 0.032, 0.008),
+            ("pmh_txt", 0.070, 0.010),
+            ("pmh_apply", 0.055, 0.016),
+            ("section_overlay", 0.030, 0.008),
+            ("ovl", 0.088, 0.012),
+            ("chk_second", 0.055, 0.014),
+            ("section_post", 0.030, 0.008),
+            ("s_sit", 0.060, 0.012),
+            ("s_pbd", 0.060, 0.012),
+            ("s_dec", 0.060, 0.020),
+            ("section_export", 0.030, 0.008),
+            ("btn3d", 0.060, 0.012),
+            ("btnstl", 0.060, 0.012),
+            ("btnval", 0.060, 0.0),
+        ]
+
+        total_consumption = sum(height + gap for _, height, gap in slots)
+        max_available = controls_top - min_panel_bottom
+        factor = max_available / total_consumption if total_consumption > max_available else 1.0
+
+        cursor = controls_top
+        panel_coords = {}
+        for name, height, gap in slots:
+            height_scaled = height * factor
+            gap_scaled = gap * factor
+            cursor -= height_scaled
+            panel_coords[name] = [panel_left, cursor, panel_width, height_scaled]
+            cursor -= gap_scaled
+
+        panel_bottom = max(cursor - 0.02, min_panel_bottom)
+
+        return {
+            "panel_left": panel_left,
+            "panel_width": panel_width,
+            "panel_bottom": panel_bottom,
+            "panel_top": panel_top,
+            "panel_coords": panel_coords,
+            "slider_coords": {
+                "s_z":   [slider_left, 0.195, slider_width, 0.045],
+                "s_T23": [slider_left, 0.118, slider_width, 0.050],
+                "s_T14": [slider_left, 0.045, slider_width, 0.050],
+            },
+            "panel_bg": [panel_left - 0.015, panel_bottom - 0.02,
+                          panel_width + 0.03, panel_top - panel_bottom + 0.07],
+            "slider_bg": [slider_left - 0.025, 0.040, slider_width + 0.05, 0.235],
+        }
+
+    layout = _build_panel_layout()
+    state["layout"] = layout
+
+    def _add_shadow(fig_obj, rect, *, offset=(0.01, -0.012), alpha=0.12, expand=0.0):
+        x, y, w, h = rect
+        ox, oy = offset
+        shadow_rect = [x + ox - expand, y + oy - expand, w + expand * 2, h + expand * 2]
+        ax_shadow = fig_obj.add_axes(shadow_rect)
+        ax_shadow.add_patch(Rectangle((0, 0), 1, 1, transform=ax_shadow.transAxes,
+                                      facecolor='black', alpha=alpha, linewidth=0))
+        ax_shadow.set_zorder(0.2)
+        ax_shadow.axis('off')
+        return ax_shadow
+
+    # Panel lateral y zona de sliders: fondos suaves
+    _ = _add_shadow(fig, layout["panel_bg"], offset=(0.012, -0.014), alpha=0.18, expand=0.01)
+    ax_panel_bg = fig.add_axes(layout["panel_bg"])
+    ax_panel_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_panel_bg.transAxes,
+                                    facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
+    ax_panel_bg.axis('off')
+
+    _ = _add_shadow(fig, layout["slider_bg"], offset=(0.008, -0.010), alpha=0.12, expand=0.006)
+    ax_slider_bg = fig.add_axes(layout["slider_bg"])
+    ax_slider_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_slider_bg.transAxes,
+                                     facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.2))
+    ax_slider_bg.axis('off')
+
+    # Encabezado informativo con fondo
+    header_rect = [0.055, 0.895, 0.66, 0.085]
+    _ = _add_shadow(fig, header_rect, offset=(0.006, -0.008), alpha=0.12, expand=0.004)
+    ax_header = fig.add_axes(header_rect)
+    ax_header.add_patch(Rectangle((0, 0), 1, 1, transform=ax_header.transAxes,
+                                  facecolor='#ffffff', edgecolor='#d0d7de', linewidth=1.1))
+    ax_header.axis('off')
+    ax_header.text(0.03, 0.66, '1. Cargar estudio · 2. Ajustar umbrales · 3. Validar / exportar',
+                   fontsize=11, color='#1f2937', weight='bold', va='center')
+    ax_header.text(0.03, 0.30,
+                   'Bone → rojo   |   Paciente → verde   |   STL exportado desde la máscara final',
+                   fontsize=9.6, color='#4b5563', va='center')
+    ax_header.text(0.97, 0.30, 'Atajos: ← → para navegar slices', fontsize=8.6, color='#6b7280',
+                   va='center', ha='right')
+
+    fig.text(0.98, 0.93, 'Panel de control', fontsize=10, color='#1f2937', ha='right', va='center',
+             fontweight='bold')
+
+    # Placeholder inicial en el eje principal
+    ax.set_facecolor('#111827')
+    ax.axis('off')
+    ax.text(0.5, 0.52, "Cargá una carpeta DICOM\ncon el panel derecho",
+            ha='center', va='center', fontsize=15, color='white', transform=ax.transAxes,
+            bbox=dict(boxstyle='round', facecolor='#1f2937', alpha=0.8, pad=0.8))
+
     # Barra de estado inferior
-    ax_status = fig.add_axes([0.05, 0.01, 0.74, 0.03]); ax_status.axis('off')
+    ax_status = fig.add_axes([0.06, 0.03, 0.64, 0.04])
+    ax_status.add_patch(Rectangle((0, 0), 1, 1, transform=ax_status.transAxes,
+                                  facecolor='#eef2ff', edgecolor='#d0d7de'))
+    ax_status.axis('off')
     state['axes']['status'] = ax_status
     def _update_status(msg=None):
-        ax_status.clear(); ax_status.axis('off')
+        ax_status.clear()
+        ax_status.add_patch(Rectangle((0, 0), 1, 1, transform=ax_status.transAxes,
+                                      facecolor='#eef2ff', edgecolor='#d0d7de'))
+        ax_status.axis('off')
         if state['vol_hu'] is not None:
             z = int(state['current_z'])
             overlay_txt = f"Bone={'ON' if state['overlay']['bone'] else 'OFF'} | Patient={'ON' if state['overlay']['patient'] else 'OFF'}"
+            folder_txt = state.get('current_folder', '')
             base = f"Z={z}   |   {overlay_txt}"
+            if folder_txt:
+                base = f"{folder_txt}   |   {base}"
         else:
             base = 'Listo para cargar un estudio DICOM.'
         if msg:
             base += '   |   ' + str(msg)
-        ax_status.text(0.0, 0.5, base, va='center', fontsize=9, color='#333')
+        ax_status.text(0.02, 0.5, base, va='center', fontsize=9.5, color='#1f2937')
         fig.canvas.draw_idle()
 
+    def _style_slider(slider, *, face='#2563eb', track='#dbeafe'):
+        try:
+            slider.ax.set_facecolor('#ffffff')
+        except Exception:
+            pass
+        for attr in ("poly", "track", "hline"):
+            obj = getattr(slider, attr, None)
+            if obj is None:
+                continue
+            try:
+                if attr == "poly":
+                    obj.set_color(face)
+                elif attr == "track":
+                    obj.set_facecolor(track)
+                else:
+                    obj.set_color('#475569')
+            except Exception:
+                continue
+        try:
+            slider.handle.set_color(face)
+        except Exception:
+            pass
+        try:
+            for h in getattr(slider, 'handles', []):
+                h.set_facecolor(face)
+        except Exception:
+            pass
 
-    # Botones fijos
-    ax_btnload = plt.axes([0.82, 0.90, 0.15, 0.05]); btnload = Button(ax_btnload, "Cargar DICOM")
-    ax_btnhist = plt.axes([0.82, 0.83, 0.15, 0.05]); btnhist = Button(ax_btnhist, "Histograma")
+        try:
+            slider.label.set_color('#0f172a')
+            slider.label.set_fontweight('bold')
+        except Exception:
+            pass
+        val_box = getattr(slider, 'valtext', None)
+        if val_box is not None:
+            try:
+                val_box.set_color('#0f172a')
+                val_box.set_bbox(dict(boxstyle='round,pad=0.24', facecolor='#f1f5f9', edgecolor='#cbd5e1'))
+                val_box.set_fontsize(9.2)
+                val_box.set_ha('right')
+                val_box.set_va('center')
+                val_box.set_position((0.96, 0.5))
+            except Exception:
+                pass
+
+    def _style_button(btn, *, color=None, text_color='#1f2937', size=10, weight='bold'):
+        try:
+            if color is not None and hasattr(btn, 'color'):
+                btn.color = color
+        except Exception:
+            pass
+        try:
+            btn.label.set_fontsize(size)
+            btn.label.set_fontweight(weight)
+            btn.label.set_color(text_color)
+        except Exception:
+            pass
+
+    def _inset_axes(pos, pad_x=0.012, pad_y=0.008):
+        x, y, w, h = pos
+        return [x + pad_x, y + pad_y, max(w - 2 * pad_x, 0.01), max(h - 2 * pad_y, 0.01)]
+
+    def _style_checkbuttons(chk, *, label_colors=None, facecolors=None, label_size=8.8):
+        try:
+            n_rects = len(chk.rectangles)
+            facecolors = facecolors or []
+            label_colors = label_colors or []
+            square = 0.28
+            extra_gap = 0.18
+            max_top = 0.0
+            try:
+                chk.ax.set_aspect('equal', adjustable='box')
+            except Exception:
+                try:
+                    chk.ax.set_box_aspect(1.0)
+                except Exception:
+                    pass
+            for idx, rect in enumerate(chk.rectangles):
+                cy = rect.get_y() + rect.get_height() * 0.5 + idx * extra_gap
+                rect.set_width(square)
+                rect.set_height(square)
+                rect.set_x(0.1)
+                rect.set_y(cy - rect.get_height() * 0.5)
+                rect.set_edgecolor('#94a3b8')
+                rect.set_linewidth(1.1)
+                if idx < len(facecolors) and facecolors[idx] is not None:
+                    rect.set_facecolor(facecolors[idx])
+                max_top = max(max_top, rect.get_y() + rect.get_height())
+            for idx, lbl in enumerate(chk.labels):
+                lbl.set_fontsize(label_size)
+                lbl.set_x(0.5)
+                try:
+                    lbl.set_y(chk.rectangles[idx].get_y() + chk.rectangles[idx].get_height() * 0.5)
+                except Exception:
+                    pass
+                if idx < len(label_colors) and label_colors[idx] is not None:
+                    lbl.set_color(label_colors[idx])
+            for idx, line in enumerate(getattr(chk, 'lines', [])):
+                rect = chk.rectangles[min(idx // 2, n_rects - 1)]
+                x0, y0 = rect.get_x(), rect.get_y()
+                x1, y1 = x0 + rect.get_width(), y0 + rect.get_height()
+                pad_x = rect.get_width() * 0.25
+                pad_y = rect.get_height() * 0.25
+                if idx % 2 == 0:
+                    xs = [x0 + pad_x, x1 - pad_x]
+                    ys = [y0 + pad_y, y1 - pad_y]
+                else:
+                    xs = [x0 + pad_x, x1 - pad_x]
+                    ys = [y1 - pad_y, y0 + pad_y]
+                line.set_data(xs, ys)
+                line.set_linewidth(1.1)
+                line.set_color('#0f172a')
+            try:
+                chk.ax.set_xlim(0, 1.18)
+                chk.ax.set_ylim(-0.08, max_top + 0.16)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+    # Botones fijos y secciones del panel
+    coords = layout["panel_coords"]
+    ax_btnload = fig.add_axes(coords["btnload"])
+    btnload = Button(ax_btnload, "Cargar DICOM", color='#2563eb', hovercolor='#1d4ed8')
+    btnload.label.set_color('white'); btnload.label.set_fontsize(11); btnload.label.set_fontweight('bold')
+
+    ax_btnhist = fig.add_axes(coords["btnhist"])
+    btnhist = Button(ax_btnhist, "Histograma", color='#e0f2fe', hovercolor='#bae6fd')
+    btnhist.label.set_color('#1f2937'); btnhist.label.set_fontsize(10)
+
+    ax_section_seg = fig.add_axes(coords["section_seg"]); ax_section_seg.axis('off')
+    ax_section_seg.text(0.0, 0.5, 'Parámetros de segmentación', fontsize=10.5, color='#111827', fontweight='bold', va='center')
+
+    ax_section_overlay = fig.add_axes(coords["section_overlay"]); ax_section_overlay.axis('off')
+    ax_section_overlay.text(0.0, 0.5, 'Visibilidad de máscaras', fontsize=10, color='#1f2937', fontweight='bold', va='center')
+
+    ax_section_post = fig.add_axes(coords["section_post"]); ax_section_post.axis('off')
+    ax_section_post.text(0.0, 0.5, 'Suavizado y refinamiento', fontsize=10, color='#1f2937', fontweight='bold', va='center')
+
+    ax_section_export = fig.add_axes(coords["section_export"]); ax_section_export.axis('off')
+    ax_section_export.text(0.0, 0.5, 'Exportar / validar', fontsize=10, color='#1f2937', fontweight='bold', va='center')
 
     state["widgets"]["btnload"] = btnload
     state["widgets"]["btnhist"] = btnhist
@@ -479,6 +758,7 @@ def launch_viewer():
     def show_main_image():
         if state["vol_hu"] is None: return
         aximg = state["axes"]["img"]; aximg.clear()
+        aximg.set_facecolor('#111827')
         z = int(np.clip(state["current_z"], 0, state["vol_hu"].shape[0]-1))
         sl = state["vol_hu"][z]
         aximg.imshow(sl, cmap="gray", vmin=state["vmin"], vmax=state["vmax"])
@@ -713,8 +993,19 @@ def launch_viewer():
         if not new_folder: return
 
         loading_win, _ = _open_loading_popup(_safe_parent_for_tk(fig), "cargando...")
+        fallback_used = False
+        fallback_trigger = None
         try:
-            img, files = read_best_series(new_folder)  # exige CT
+            try:
+                img, files = read_best_series(new_folder)  # exige CT
+            except NoCTSeriesFound as err:
+                fallback_used = True
+                fallback_trigger = err
+                try:
+                    img, files = read_best_series(new_folder, require_modality_ct=False)
+                except NoSeriesFound as inner_err:
+                    setattr(inner_err, "fallback_trigger", err)
+                    raise
             hu = to_hu(img, files[0], file_list=files)
             vol_hu = sitk.GetArrayFromImage(hu)
             state["hu"], state["vol_hu"] = hu, vol_hu
@@ -722,62 +1013,177 @@ def launch_viewer():
             state["current_z"] = vol_hu.shape[0]//2
 
             # Actualizar título con la carpeta cargada
+            base_name = os.path.basename(new_folder)
+            state["current_folder"] = base_name
             try:
-                fig.suptitle(f'Segmentación de rodilla – {os.path.basename(new_folder)}', fontsize=13)
+                fig.suptitle(f'Segmentación de rodilla – {base_name}', fontsize=13, fontweight='bold')
             except Exception:
                 pass
 
-            if "s_z" not in state["widgets"]:state["axes"]["img"].set_position([0.05, 0.26, 0.77, 0.66])
-            # Controles laterales (derecha)
-            ax_pmh_txt    = fig.add_axes([0.82, 0.60, 0.15, 0.035]); tb_pmh        = TextBox(ax_pmh_txt, "Patient HU >", initial=str(int(state.get("patient_hu_thr",150))))
-            ax_pmh_apply  = fig.add_axes([0.82, 0.56, 0.15, 0.035]); btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU")
+            state["axes"]["img"].set_position([0.06, 0.29, 0.66, 0.57])
 
-            ax_ovl = fig.add_axes([0.82, 0.44, 0.15, 0.07]); chk_ovl = CheckButtons(ax_ovl, ["Ver Bone", "Ver Patient"], [state["overlay"]["bone"], state["overlay"]["patient"]])
-            ax_chk = fig.add_axes([0.82, 0.38, 0.15, 0.05]); chk_2nd  = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
+            coords = state["layout"]["panel_coords"]
+            if not state.get("ui_initialized"):
+                # ---- Controles del panel (creados una sola vez) ----
+                ax_pmh_txt = fig.add_axes(coords["pmh_txt"])
+                tb_pmh = TextBox(ax_pmh_txt, "Patient HU >", initial=str(int(state.get("patient_hu_thr", 150))))
+                try:
+                    tb_pmh.label.set_color('#1f2937'); tb_pmh.label.set_fontsize(9.5)
+                    tb_pmh.text_disp.set_fontsize(10)
+                    tb_pmh.text_disp.set_color('#0f172a')
+                    tb_pmh.text_disp.set_bbox(dict(boxstyle='round,pad=0.24', facecolor='#f8fafc', edgecolor='#cbd5e1'))
+                except Exception:
+                    pass
+                ax_pmh_txt.set_facecolor('none')
+                for spine in ax_pmh_txt.spines.values():
+                    spine.set_color('#d0d7de')
+                    spine.set_linewidth(1.1)
 
-            ax_sit = fig.add_axes([0.82, 0.34, 0.15, 0.03]); s_sit = Slider(ax_sit, "Smoothing iters", 0, 100, valinit=50, valstep=1)
-            ax_pbd = fig.add_axes([0.82, 0.30, 0.15, 0.03]); s_pbd = Slider(ax_pbd, "Passband", 0.001, 0.1, valinit=0.01)
-            ax_dec = fig.add_axes([0.82, 0.26, 0.15, 0.03]); s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
-            ax_btn3d  = fig.add_axes([0.82, 0.18, 0.15, 0.05]); btn3d  = Button(ax_btn3d,  "3D (VTK)", hovercolor="0.9")
-            ax_btnstl = fig.add_axes([0.82, 0.11, 0.15, 0.05]); btnstl = Button(ax_btnstl, "Guardar STL", hovercolor="0.9")
-            ax_btnval = fig.add_axes([0.82, 0.04, 0.15, 0.05]); btnval = Button(ax_btnval, "Validar (sin GT)", hovercolor="0.9")
+                ax_pmh_apply = fig.add_axes(coords["pmh_apply"])
+                btn_pmh_apply = Button(ax_pmh_apply, "Aplicar HU", color='#dcfce7', hovercolor='#bbf7d0')
+                _style_button(btn_pmh_apply, text_color='#166534', size=10)
 
-            # Sliders inferiores (izquierda)
-            ax_z   = fig.add_axes([0.10, 0.16, 0.66, 0.03]); s_z   = Slider(ax_z, "Slice (Z)", 0, vol_hu.shape[0]-1, valinit=state["current_z"], valstep=1)
-            # Superior: estrecho T2–T3 | Inferior: amplio T1–T4
-            ax_T23 = fig.add_axes([0.10, 0.10, 0.66, 0.04]); s_T23 = RangeSlider(ax_T23, "T2–T3 (HU)", -500, 3000, valinit=(300, 1200))
-            ax_T14 = fig.add_axes([0.10, 0.04, 0.66, 0.04]); s_T14 = RangeSlider(ax_T14, "T1–T4 (HU)", -500, 3000, valinit=(150, 2000))
+                ax_ovl_bg = fig.add_axes(coords["ovl"])
+                ax_ovl_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_ovl_bg.transAxes,
+                                               facecolor='#f8fafc', edgecolor='#d0d7de', linewidth=1.0))
+                ax_ovl_bg.axis('off')
+                ax_ovl = fig.add_axes(_inset_axes(coords["ovl"], pad_x=0.022, pad_y=0.016))
+                chk_ovl = CheckButtons(ax_ovl, ["Ver Bone", "Ver Patient"],
+                                      [state["overlay"]["bone"], state["overlay"]["patient"]])
+                ax_ovl.set_facecolor('none')
+                _style_checkbuttons(chk_ovl,
+                                    label_colors=['#b91c1c', '#047857'],
+                                    facecolors=['#fee2e2', '#dcfce7'])
+                ax_ovl_bg.text(0.5, 1.08, 'Activar superposiciones', fontsize=8.8, color='#475569',
+                                ha='center', va='bottom')
 
-            state["widgets"].update({
-                "tb_pmh": tb_pmh, "btn_pmh_apply": btn_pmh_apply,
-                "chk_2nd": chk_2nd, "chk_ovl": chk_ovl,
-                "s_sit": s_sit, "s_pbd": s_pbd, "s_dec": s_dec,
-                "btn3d": btn3d, "btnstl": btnstl, "btnval": btnval,
-                "s_z": s_z, "s_T23": s_T23, "s_T14": s_T14
-            })
+                ax_chk_bg = fig.add_axes(coords["chk_second"])
+                ax_chk_bg.add_patch(Rectangle((0, 0), 1, 1, transform=ax_chk_bg.transAxes,
+                                               facecolor='#f8fafc', edgecolor='#d0d7de', linewidth=1.0))
+                ax_chk_bg.axis('off')
+                ax_chk = fig.add_axes(_inset_axes(coords["chk_second"], pad_x=0.022, pad_y=0.014))
+                chk_2nd = CheckButtons(ax_chk, ["2º rango (T3–T4)"], [True])
+                ax_chk.set_facecolor('none')
+                _style_checkbuttons(chk_2nd, label_colors=['#1f2937'], facecolors=['#e2e8f0'])
+                ax_chk_bg.text(0.5, 1.08, 'Máscaras avanzadas', fontsize=8.6, color='#475569',
+                               ha='center', va='bottom')
 
-            # Ajustar etiquetas de sliders y formatear valtext
-            try:
-                for _s in (s_sit, s_pbd, s_dec, s_z, s_T23, s_T14):
+                ax_sit = fig.add_axes(coords["s_sit"])
+                s_sit = Slider(ax_sit, "Suavizado (iters)", 0, 100, valinit=50, valstep=1)
+                _style_slider(s_sit, face='#f97316', track='#ffedd5')
+
+                ax_pbd = fig.add_axes(coords["s_pbd"])
+                s_pbd = Slider(ax_pbd, "Passband", 0.001, 0.1, valinit=0.01)
+                _style_slider(s_pbd, face='#0ea5e9', track='#dbeafe')
+
+                ax_dec = fig.add_axes(coords["s_dec"])
+                s_dec = Slider(ax_dec, "Decimation %", 0.0, 90.0, valinit=0.0)
+                _style_slider(s_dec, face='#22c55e', track='#dcfce7')
+
+                for _ax in (ax_sit, ax_pbd, ax_dec):
+                    _ax.set_facecolor('none')
+                    for spine in _ax.spines.values():
+                        spine.set_alpha(0)
+
+                ax_btn3d = fig.add_axes(coords["btn3d"])
+                btn3d = Button(ax_btn3d, "Visualizar 3D", color='#ede9fe', hovercolor='#ddd6fe')
+                _style_button(btn3d, text_color='#4c1d95', size=10)
+
+                ax_btnstl = fig.add_axes(coords["btnstl"])
+                btnstl = Button(ax_btnstl, "Guardar STL", color='#fef3c7', hovercolor='#fde68a')
+                _style_button(btnstl, text_color='#92400e', size=10)
+
+                ax_btnval = fig.add_axes(coords["btnval"])
+                btnval = Button(ax_btnval, "Validar (sin GT)", color='#e2e8f0', hovercolor='#cbd5e1')
+                _style_button(btnval, text_color='#111827', size=10)
+
+                slider_axes = {}
+                for key, pos in state["layout"]["slider_coords"].items():
+                    slider_axes[key] = fig.add_axes(pos)
+                state["layout"]["slider_axes"] = slider_axes
+
+                state["widgets"].update({
+                    "tb_pmh": tb_pmh, "btn_pmh_apply": btn_pmh_apply,
+                    "chk_ovl": chk_ovl, "chk_2nd": chk_2nd,
+                    "s_sit": s_sit, "s_pbd": s_pbd, "s_dec": s_dec,
+                    "btn3d": btn3d, "btnstl": btnstl, "btnval": btnval,
+                })
+
+                btn_pmh_apply.on_clicked(on_apply_patient_hu)
+                chk_ovl.on_clicked(on_overlay_clicked)
+                chk_2nd.on_clicked(lambda _evt: recompute_all())
+                btn3d.on_clicked(on_3d)
+                btnstl.on_clicked(on_stl)
+                btnval.on_clicked(on_validate)
+                s_sit.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+                s_pbd.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+                s_dec.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
+
+                state["ui_initialized"] = True
+            else:
+                # Actualizar controles existentes
+                tb_pmh = state["widgets"].get("tb_pmh")
+                if tb_pmh is not None:
+                    try:
+                        tb_pmh.set_val(str(int(state.get("patient_hu_thr", 150))))
+                    except Exception:
+                        pass
+                chk_ovl = state["widgets"].get("chk_ovl")
+                if chk_ovl is not None:
+                    desired = [True, True]
+                    for idx, want in enumerate(desired):
+                        cur = chk_ovl.get_status()[idx]
+                        if cur != want:
+                            chk_ovl.set_active(idx)
+                chk_2nd = state["widgets"].get("chk_2nd")
+                if chk_2nd is not None:
+                    if not chk_2nd.get_status()[0]:
+                        chk_2nd.set_active(0)
+
+            slider_axes = state["layout"].get("slider_axes", {})
+            if not slider_axes:
+                slider_axes = {}
+                for key, pos in state["layout"]["slider_coords"].items():
+                    slider_axes[key] = fig.add_axes(pos)
+                state["layout"]["slider_axes"] = slider_axes
+
+            for key in ("s_z", "s_T23", "s_T14"):
+                widget = state["widgets"].pop(key, None)
+                if widget is not None:
+                    try:
+                        widget.disconnect_events()
+                    except Exception:
+                        pass
+                    try:
+                        widget.ax.cla()
+                    except Exception:
+                        pass
+
+            s_z = Slider(slider_axes["s_z"], "Slice (Z)", 0, max(vol_hu.shape[0]-1, 0),
+                         valinit=float(state["current_z"]), valstep=1, color='#0ea5e9')
+            s_T23 = RangeSlider(slider_axes["s_T23"], "T2–T3 (HU)", -500, 3000, valinit=(300, 1200), facecolor='#22c55e')
+            s_T14 = RangeSlider(slider_axes["s_T14"], "T1–T4 (HU)", -500, 3000, valinit=(150, 2000), facecolor='#16a34a')
+
+            for _s in (state["widgets"].get("s_sit"), state["widgets"].get("s_pbd"),
+                       state["widgets"].get("s_dec"), s_z, s_T23, s_T14):
+                if _s is None:
+                    continue
+                try:
                     _s.valtext.set_fontsize(9)
-            except Exception:
-                pass
+                except Exception:
+                    pass
+
+            _style_slider(s_z, face='#0ea5e9', track='#bae6fd')
+            _style_slider(s_T23, face='#22c55e', track='#dcfce7')
+            _style_slider(s_T14, face='#16a34a', track='#d1fae5')
+
+            state["widgets"].update({"s_z": s_z, "s_T23": s_T23, "s_T14": s_T14})
+
             _format_slider_labels()
 
-
-            # Callbacks
             s_T23.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_T14.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
             s_z.on_changed(lambda v: (_format_slider_labels(), on_slice_change(v)))
-            chk_2nd.on_clicked(recompute_all)
-            chk_ovl.on_clicked(on_overlay_clicked)
-            btn3d.on_clicked(on_3d)
-            btnstl.on_clicked(on_stl)
-            btnval.on_clicked(on_validate)
-            s_sit.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            s_pbd.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            s_dec.on_changed(lambda _v: (_format_slider_labels(), recompute_all()))
-            state["widgets"]["btn_pmh_apply"].on_clicked(on_apply_patient_hu)
             use2 = state["widgets"]["chk_2nd"].get_status()[0] if "chk_2nd" in state["widgets"] else True
             (T1v, T4v) = state["widgets"].get("s_T14", type("obj", (), {"val": (150,2000)})()).val
             (T2v, T3v) = state["widgets"].get("s_T23", type("obj", (), {"val": (300,1200)})()).val
@@ -798,17 +1204,37 @@ def launch_viewer():
             state["mask_final"]   = sitk.GetArrayFromImage(final_s).astype(np.float32)
 
             show_main_image(); update_hist_window()
-            print(f"[LOAD] Serie DICOM cargada: {new_folder}")
+
+            modality_loaded, _sop_uid = _get_dicom_tags(files[0])
+            modality_label = modality_loaded if modality_loaded else "Desconocida"
+            if fallback_used:
+                print(f"[LOAD] Serie DICOM cargada en fallback (modalidad={modality_label}): {new_folder}")
+            else:
+                print(f"[LOAD] Serie DICOM cargada (modalidad={modality_label}): {new_folder}")
+        except NoSeriesFound as e:
+            _close_loading_popup(loading_win)
+            fallback_trigger = getattr(e, "fallback_trigger", fallback_trigger)
+            if isinstance(e, NoCTSeriesFound) or (fallback_trigger is not None and getattr(e, "code", "") != "no_series"):
+                mods = getattr(fallback_trigger, "found_modalities", None) or getattr(e, "found_modalities", None)
+                if mods:
+                    mods_text = ", ".join(mods)
+                    _show_info_message(f"Se detectaron series DICOM pero ninguna es TC (modalidades: {mods_text}).", title="Aviso")
+                    print(f"[LOAD] No se encontraron series CT en {new_folder}. Modalidades: {mods_text}")
+                else:
+                    _show_info_message("Se detectaron series DICOM pero ninguna es TC.", title="Aviso")
+                    print(f"[LOAD] No se encontraron series CT en {new_folder}. Modalidades: desconocidas")
+            elif getattr(e, "code", "") == "no_series":
+                _show_info_message("La carpeta seleccionada no contiene archivos DICOM válidos.", title="Aviso")
+                print(f"[LOAD] No se encontraron series DICOM en {new_folder}")
+            else:
+                _show_info_message("No se encontró una serie DICOM compatible en la carpeta seleccionada.", title="Aviso")
+                print(f"[LOAD] No se encontró serie compatible en {new_folder}: {e}")
+            return
         except Exception as e:
             # Cerrar el popup de carga ANTES de mostrar el info
             _close_loading_popup(loading_win)
             msg = str(e)
-            if "NoSeriesFound" in msg or "No Series were found" in msg:
-                _show_info_message("La carpeta seleccionada no contiene archivos DICOM válidos.", title="Aviso")
-            elif ("CT válida" in msg) or ("Modality" in msg) or (" CT " in msg) or ("no son TC" in msg):
-                _show_info_message("Las imágenes cargadas no son TC.", title="Aviso")
-            else:
-                _show_info_message(f"Error al cargar:{msg}", title="Error")
+            _show_info_message(f"Error al cargar:{msg}", title="Error")
             print(f"[LOAD] Error al cargar nueva serie: {e}")
             return
         finally:
